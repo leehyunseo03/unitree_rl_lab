@@ -17,8 +17,11 @@ class BasePPORunnerCfg(RslRlOnPolicyRunnerCfg):
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
         actor_hidden_dims=[512, 256, 128],
-        critic_hidden_dims=[512, 256, 128],
+        critic_hidden_dims=[2048, 512, 128],
+        # critic_hidden_dims=[512, 256, 128],
         activation="elu",
+        # actor_obs_normalization=True,
+        # critic_obs_normalization=True,
     )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
@@ -34,3 +37,21 @@ class BasePPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
+    clip_actions = 4.0
+    
+    # wandb logger
+    logger = "wandb"
+    wandb_project = "unitree_rl_lab"
+
+
+
+
+@configclass
+class FlatPPORunnerCfg(BasePPORunnerCfg):
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.max_iterations = 30000
+        self.experiment_name = ""
+        self.policy.actor_hidden_dims = [512, 256, 128]
+        self.policy.critic_hidden_dims = [512, 256, 128]

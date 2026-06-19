@@ -14,6 +14,7 @@ from isaaclab.app import AppLauncher
 
 # local imports
 import cli_args  # isort: skip
+import wandb
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
@@ -152,21 +153,80 @@ def main():
     export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
 
     dt = env.unwrapped.step_dt
+    
+    
+    #wandb init
+    wandb.init(
+        project="unitree_rl_lab_play",
+        name=os.path.basename(log_dir)+"_play",
+        config={
+            "task": args_cli.task,
+            "log_dir": log_dir,
+            "checkpoint": resume_path,
+        },
+    )
 
     # reset environment
     obs = env.get_observations()
     if version("rsl-rl-lib").startswith("2.3."):
         obs, _ = env.get_observations()
     timestep = 0
+    
+    
+    # for torque env
+    index = [3,9,4,10] # l_hip_roll, l_knee, r_hip_roll, r_knee
+    robot = env.unwrapped.scene["robot"]
+    
+    max_torque = 0.0
+    
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
-            actions = policy(obs)
+            actions = policy(obs) # policy output
+            processed_actions = actions * 0.25 + 0.3 # aka target positions
+
+            # terminal log, policy output actions
+            # print(f"ACTIONS | l_hip_roll: {actions[0,3]:.2f} | l_knee: {actions[0,9]:.2f} | r_hip_roll: {actions[0,4]:.2f} | r_knee: {actions[0,10]:.2f}")
+            
             # env stepping
             obs, _, _, _ = env.step(actions)
+            
+            current_max_tq = torch.max(torch.abs(robot.data.applied_torque)).item()
+            if current_max_tq > max_torque:
+                max_torque = current_max_tq
+            torque = robot.data.applied_torque[0, index]
+            # print(f"ALLTORQ | {robot.data.applied_torque[0]}") # log every joint's torque
+            # print(f"TORQUES | l_hip_roll: {torque[0]:.2f} | l_knee: {torque[1]:.2f} | r_hip_roll: {torque[2]:.2f} | r_knee: {torque[3]:.2f} | Max Torque: {current_max_tq:.2f}")
+            
+            real_action = robot.data.joint_pos[0, index]
+            joint_vel = robot.data.joint_vel[0, index]
+            # proj_gravity = robot.data.projected_gravity_b[0]
+            
+            # wandb logging
+            wandb.log({
+                "action_l_hip_roll": actions[0,3].item(),
+                "action_l_knee": actions[0,9].item(),
+                "action_r_hip_roll": actions[0,4].item(),
+                "action_r_knee": actions[0,10].item(),
+                "real_action_l_hip_roll": real_action[0].item(),
+                "real_action_l_knee": real_action[1].item(),
+                "real_action_r_hip_roll": real_action[2].item(),
+                "real_action_r_knee": real_action[3].item(),
+                
+                "processed_action_r_knee": processed_actions[0,10].item(),
+                
+                "joint_vel_l_knee": joint_vel[1].item(),
+                "joint_vel_r_knee": joint_vel[3].item(),
+                "torque_l_hip_roll": torque[0].item(),
+                "torque_l_knee": torque[1].item(),
+                "torque_r_hip_roll": torque[2].item(),
+                "torque_r_knee": torque[3].item(),
+            })
+            
+            
         if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video
@@ -179,6 +239,7 @@ def main():
             time.sleep(sleep_time)
 
     # close the simulator
+    wandb.finish()
     env.close()
 
 
