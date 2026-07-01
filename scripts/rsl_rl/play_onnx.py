@@ -5,10 +5,17 @@
 
 import argparse
 import os
+import pathlib
+import sys
 import time
 from collections.abc import Mapping
 
 from isaaclab.app import AppLauncher
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+SOURCE_PATH = REPO_ROOT / "source" / "unitree_rl_lab"
+if str(SOURCE_PATH) not in sys.path:
+    sys.path.insert(0, str(SOURCE_PATH))
 
 parser = argparse.ArgumentParser(description="Play an exported ONNX policy in Isaac Lab.")
 parser.add_argument("--task", type=str, default="Unitree-G1-29dof-Velocity", help="Name of the task.")
@@ -44,6 +51,12 @@ parser.add_argument(
     help="Continuously update the viewport camera to follow the robot.",
 )
 parser.add_argument(
+    "--no-webrtc-dynamic-resize",
+    action="store_true",
+    default=False,
+    help="Do not enable Kit's WebRTC dynamic stream resizing workaround.",
+)
+parser.add_argument(
     "--disable-base-contact-termination",
     action="store_true",
     default=False,
@@ -55,6 +68,31 @@ parser.add_argument(
 )
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
+
+
+def _livestream_enabled(args_cli):
+    if args_cli.livestream >= 0:
+        return args_cli.livestream > 0
+    return int(os.environ.get("LIVESTREAM", 0)) > 0
+
+
+def _append_kit_arg(args_cli, setting):
+    kit_args = args_cli.kit_args or ""
+    if setting not in kit_args:
+        args_cli.kit_args = f"{kit_args} {setting}".strip()
+
+
+LIVESTREAM_ENABLED = _livestream_enabled(args_cli)
+
+if LIVESTREAM_ENABLED:
+    args_cli.camera_follow = True
+    if not getattr(args_cli, "visualizer_explicit", False):
+        args_cli.visualizer = ["kit"]
+    if not args_cli.no_webrtc_dynamic_resize:
+        _append_kit_arg(
+            args_cli,
+            "--/exts/omni.kit.livestream.app/primaryStream/allowDynamicResize=true",
+        )
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
@@ -85,6 +123,13 @@ def _update_camera(env, robot):
     target = [float(root_pos[0]), float(root_pos[1]), float(root_pos[2] + 0.35)]
     eye = [target[0] + 3.0, target[1] + 3.0, target[2] + 1.3]
     env.unwrapped.sim.set_camera_view(eye=eye, target=target)
+
+
+def _warm_up_livestream(env, frames=3):
+    if not LIVESTREAM_ENABLED:
+        return
+    for _ in range(frames):
+        env.unwrapped.sim.render()
 
 
 def _resolve_command(args_cli):
@@ -173,6 +218,7 @@ def main():
     robot = env.unwrapped.scene["robot"]
     if not args_cli.no_camera_follow:
         _update_camera(env, robot)
+    _warm_up_livestream(env)
     _force_runtime_base_velocity(env, command)
 
     session = ort.InferenceSession(policy_path, providers=["CPUExecutionProvider"])

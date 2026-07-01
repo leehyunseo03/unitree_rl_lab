@@ -16,6 +16,5 @@ RUN bash -i -c "source ${HOME}/.bashrc && \
     cd ${DOCKER_ISAACLAB_EXTENSION_TEMPLATE_PATH}/source/unitree_rl_lab && \
     pip install -e ."
 
-# make working directory as the Isaac Lab directory
-# this is the default directory when the container is run
-WORKDIR /workspace
+# Make the Unitree RL Lab repository the default directory when the container is run.
+WORKDIR ${DOCKER_ISAACLAB_EXTENSION_TEMPLATE_PATH}

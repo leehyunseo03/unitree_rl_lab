@@ -13,7 +13,7 @@ import os
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import IdealPDActuatorCfg, ImplicitActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from unitree_rl_lab.assets.robots import unitree_actuators
 
@@ -511,6 +511,10 @@ UNITREE_G1_29DOF_CFG = UnitreeArticulationCfg(
         "right_wrist_yaw_joint",
     ],
 )
+
+
+UNITREE_G1_29DOF_MIMIC_ACTION_SCALE = 0.25
+UNITREE_G1_29DOF_MIMIC_CFG = UNITREE_G1_29DOF_CFG
 
 
 """Configuration for the Unitree G1 23DOF Humanoid robot."""

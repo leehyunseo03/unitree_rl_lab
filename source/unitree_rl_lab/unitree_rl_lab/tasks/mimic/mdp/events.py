@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import numpy as np
 import torch
+import warp as wp
 from typing import TYPE_CHECKING, Literal
 
 import isaaclab.utils.math as math_utils
@@ -68,26 +70,31 @@ def randomize_rigid_body_com(
     asset: Articulation = env.scene[asset_cfg.name]
     # resolve environment ids
     if env_ids is None:
-        env_ids = torch.arange(env.scene.num_envs, device="cpu")
+        env_ids = np.arange(env.scene.num_envs, dtype=np.uint32)
     else:
-        env_ids = env_ids.cpu()
+        env_ids = env_ids.cpu().numpy().astype(np.uint32)
 
     # resolve body indices
     if asset_cfg.body_ids == slice(None):
-        body_ids = torch.arange(asset.num_bodies, dtype=torch.int, device="cpu")
+        body_ids = np.arange(asset.num_bodies)
     else:
-        body_ids = torch.tensor(asset_cfg.body_ids, dtype=torch.int, device="cpu")
+        body_ids = np.asarray(asset_cfg.body_ids, dtype=np.int64)
 
     # sample random CoM values
     range_list = [com_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z"]]
     ranges = torch.tensor(range_list, device="cpu")
-    rand_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 3), device="cpu").unsqueeze(1)
+    rand_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 3), device="cpu").numpy()[
+        :, None, :
+    ]
 
     # get the current com of the bodies (num_assets, num_bodies)
-    coms = asset.root_physx_view.get_coms().clone()
+    coms = np.array(asset.root_physx_view.get_coms().numpy(), copy=True)
 
     # Randomize the com in range
     coms[:, body_ids, :3] += rand_samples
 
     # Set the new coms
-    asset.root_physx_view.set_coms(coms, env_ids)
+    try:
+        asset.root_physx_view.set_coms(wp.array(coms, dtype=wp.float32), wp.array(env_ids, dtype=wp.uint32))
+    except Exception as exc:
+        print(f"[WARN] Skipping CoM randomization because PhysX rejected set_coms: {exc}")

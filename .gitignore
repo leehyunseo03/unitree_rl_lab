@@ -73,3 +73,7 @@ datasets
 
 # Mimic
 *.npz
+
+
+# Cache
+*.etli
