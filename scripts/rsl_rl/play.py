@@ -31,6 +31,7 @@ parser.add_argument(
     help="Use the pre-trained checkpoint from Nucleus.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument("--export-only", action="store_true", default=False, help="Export the checkpoint and exit.")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -47,6 +48,7 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import gymnasium as gym
+import copy
 import os
 import time
 import torch
@@ -57,12 +59,60 @@ import isaaclab_tasks  # noqa: F401
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
+from isaaclab_rl.rsl_rl import (
+    RslRlOnPolicyRunnerCfg,
+    RslRlVecEnvWrapper,
+    export_policy_as_jit,
+    export_policy_as_onnx,
+    handle_deprecated_rsl_rl_cfg,
+)
+from isaaclab_rl.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 from isaaclab_tasks.utils import get_checkpoint_path
 
 import unitree_rl_lab.tasks  # noqa: F401
 from unitree_rl_lab.utils.parser_cfg import parse_env_cfg
+
+
+class _FlatTensorPolicyExporter(torch.nn.Module):
+    """Wrap an rsl-rl 5.x MLPModel actor so ONNX playback can feed a flat observation tensor."""
+
+    def __init__(self, actor):
+        super().__init__()
+        actor = copy.deepcopy(actor).cpu().eval()
+        self.obs_normalizer = actor.obs_normalizer
+        self.mlp = actor.mlp
+        self.distribution = actor.distribution
+        self.obs_dim = actor.obs_dim
+
+    def forward(self, obs):
+        output = self.mlp(self.obs_normalizer(obs))
+        if self.distribution is not None:
+            return self.distribution.deterministic_output(output)
+        return output
+
+    def export(self, path):
+        os.makedirs(path, exist_ok=True)
+        dummy_obs = torch.zeros(1, self.obs_dim)
+        traced = torch.jit.trace(self, dummy_obs)
+        traced.save(os.path.join(path, "policy.pt"))
+        torch.onnx.export(
+            self,
+            dummy_obs,
+            os.path.join(path, "policy.onnx"),
+            export_params=True,
+            opset_version=18,
+            input_names=["obs"],
+            output_names=["actions"],
+            dynamic_axes={},
+        )
+
+
+def _export_policy(policy_nn, normalizer, export_model_dir):
+    if hasattr(policy_nn, "actor") or hasattr(policy_nn, "student"):
+        export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
+        export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+    else:
+        _FlatTensorPolicyExporter(policy_nn).export(export_model_dir)
 
 
 def main():
@@ -76,6 +126,7 @@ def main():
         entry_point_key="play_env_cfg_entry_point",
     )
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
+    agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, version("rsl-rl-lib"))
 
     # specify directory for logging experiments
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
@@ -131,13 +182,14 @@ def main():
     policy = runner.get_inference_policy(device=env.unwrapped.device)
 
     # extract the neural network module
-    # we do this in a try-except to maintain backwards compatibility.
-    try:
-        # version 2.3 onwards
+    if hasattr(runner.alg, "policy"):
         policy_nn = runner.alg.policy
-    except AttributeError:
-        # version 2.2 and below
+    elif hasattr(runner.alg, "actor_critic"):
         policy_nn = runner.alg.actor_critic
+    elif hasattr(runner.alg, "get_policy"):
+        policy_nn = runner.alg.get_policy()
+    else:
+        raise AttributeError(f"Cannot find a policy module on algorithm type: {type(runner.alg).__name__}")
 
     # extract the normalizer
     if hasattr(policy_nn, "actor_obs_normalizer"):
@@ -149,8 +201,11 @@ def main():
 
     # export policy to onnx/jit
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
-    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+    _export_policy(policy_nn, normalizer, export_model_dir)
+    print(f"[INFO] Exported policy to: {export_model_dir}")
+    if args_cli.export_only:
+        env.close()
+        return
 
     dt = env.unwrapped.step_dt
     

@@ -14,7 +14,7 @@ from . import velocity_env_cfg as base_cfg
 
 BACKPACK_SIZE = (0.06, 0.14, 0.12)
 BACKPACK_BACK_SURFACE_X = -0.085
-BACKPACK_LOCAL_POS = (BACKPACK_BACK_SURFACE_X - 0.5 * BACKPACK_SIZE[0], 0.0, 0.2)
+BACKPACK_LOCAL_POS = (BACKPACK_BACK_SURFACE_X - 0.5 * BACKPACK_SIZE[0], 0.0, 0.15)
 BACKPACK_MASS_RANGE = (0.6, 1.0)
 BACKPACK_PLAY_MASS = (0.8, 0.8)
 BACKPACK_COM_X_RANDOMIZATION = 0.01
@@ -98,6 +98,48 @@ class EventCfg(base_cfg.EventCfg):
 
 
 @configclass
+class CommandsCfg(base_cfg.CommandsCfg):
+    """Forward-only velocity commands for flat backpack walking."""
+
+    base_velocity = mdp.UniformLevelVelocityCommandCfg(
+        asset_name="robot",
+        resampling_time_range=(10.0, 10.0),
+        rel_standing_envs=0.05,
+        rel_heading_envs=0.0,
+        heading_command=False,
+        debug_vis=True,
+        ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
+            lin_vel_x=(0.0, 0.1),
+            lin_vel_y=(0.0, 0.0),
+            ang_vel_z=(0.0, 0.0),
+        ),
+        limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
+            lin_vel_x=(0.0, 0.6),
+            lin_vel_y=(0.0, 0.0),
+            ang_vel_z=(0.0, 0.0),
+        ),
+        vel_xy_success_threshold=0.35,
+        vel_yaw_success_threshold=0.2,
+    )
+
+
+_BASE_REWARDS = base_cfg.RewardsCfg()
+
+
+@configclass
+class RewardsCfg(base_cfg.RewardsCfg):
+    """Backpack reward weights tuned toward stable forward walking."""
+
+    track_lin_vel_xy = _BASE_REWARDS.track_lin_vel_xy.replace(weight=2.0)
+    track_ang_vel_z = _BASE_REWARDS.track_ang_vel_z.replace(weight=1.5)
+    base_angular_velocity = _BASE_REWARDS.base_angular_velocity.replace(weight=-0.10)
+    action_rate = _BASE_REWARDS.action_rate.replace(weight=-0.03)
+    flat_orientation_l2 = _BASE_REWARDS.flat_orientation_l2.replace(weight=-3.0)
+    gait = _BASE_REWARDS.gait.replace(weight=0.3)
+    feet_air_time = _BASE_REWARDS.feet_air_time.replace(weight=0.05)
+
+
+@configclass
 class CurriculumCfg(base_cfg.CurriculumCfg):
     """No terrain curriculum for the flat backpack task."""
 
@@ -110,6 +152,8 @@ class RobotEnvCfg(base_cfg.RobotEnvCfg):
     """Flat locomotion environment with an 800 g backpack payload model."""
 
     scene: RobotSceneCfg = RobotSceneCfg(num_envs=4096, env_spacing=2.5)
+    commands: CommandsCfg = CommandsCfg()
+    rewards: RewardsCfg = RewardsCfg()
     events: EventCfg = EventCfg()
     curriculum: CurriculumCfg = CurriculumCfg()
 
