@@ -77,3 +77,6 @@ datasets
 
 # Cache
 *.etli
+
+*.bin
+*.toc
