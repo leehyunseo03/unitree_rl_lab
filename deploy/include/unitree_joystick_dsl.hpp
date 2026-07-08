@@ -66,6 +66,7 @@
 #include <cctype>
 #include <memory>
 #include <algorithm>
+#include <chrono>
 #include <yaml-cpp/yaml.h>
 
 #include <unitree/dds_wrapper/common/unitree_joystick.hpp>
@@ -156,36 +157,74 @@ inline std::string ToLower(std::string s) {
   return s;
 }
 
-// Retrieve KeyBase from UnitreeJoystick (case-insensitive)
-inline const KeyBase& GetKey(const UnitreeJoystick& joy, std::string_view name_sv) {
+struct KeyState {
+  bool pressed = false;
+  bool on_pressed = false;
+  bool on_released = false;
+  float pressed_time = 0.0f;
+};
+
+inline KeyState WithPressedTime(std::string_view name, bool pressed, bool on_pressed, bool on_released) {
+  using Clock = std::chrono::steady_clock;
+  struct HoldState {
+    bool was_pressed = false;
+    Clock::time_point pressed_since = Clock::now();
+  };
+
+  static std::unordered_map<std::string, HoldState> hold_states;
+
+  const auto now = Clock::now();
+  auto& hold = hold_states[std::string{name}];
+
+  if (pressed) {
+    if (!hold.was_pressed || on_pressed) {
+      hold.pressed_since = now;
+    }
+    hold.was_pressed = true;
+  } else {
+    hold.was_pressed = false;
+  }
+
+  KeyState state;
+  state.pressed = pressed;
+  state.on_pressed = on_pressed;
+  state.on_released = on_released;
+  state.pressed_time = pressed
+      ? std::chrono::duration<float>(now - hold.pressed_since).count()
+      : 0.0f;
+  return state;
+}
+
+// Retrieve key state from UnitreeJoystick (case-insensitive)
+inline KeyState GetKey(const UnitreeJoystick& joy, std::string_view name_sv) {
   const std::string name = ToLower(std::string{name_sv});
-  static const std::unordered_map<std::string, const KeyBase* (*)(const UnitreeJoystick&)> kMap = {
-    {"back", [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.back); }},
-    {"start",[](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.start); }},
-    {"ls",   [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.LS); }},
-    {"rs",   [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.RS); }},
-    {"lb",   [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.LB); }},
-    {"rb",   [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.RB); }},
-    {"a",    [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.A); }},
-    {"b",    [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.B); }},
-    {"x",    [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.X); }},
-    {"y",    [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.Y); }},
-    {"up",   [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.up); }},
-    {"down", [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.down); }},
-    {"left", [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.left); }},
-    {"right",[](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.right); }},
-    {"f1",   [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.F1); }},
-    {"f2",   [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.F2); }},
-    {"lx",   [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.lx); }},
-    {"ly",   [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.ly); }},
-    {"rx",   [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.rx); }},
-    {"ry",   [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.ry); }},
-    {"lt",   [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.LT); }},
-    {"rt",   [](auto& j)->const KeyBase*{ return &static_cast<const KeyBase&>(j.RT); }},
+  static const std::unordered_map<std::string, KeyState (*)(const UnitreeJoystick&, std::string_view)> kMap = {
+    {"back", [](auto& j, auto n){ return WithPressedTime(n, j.back.pressed, j.back.on_pressed, j.back.on_released); }},
+    {"start",[](auto& j, auto n){ return WithPressedTime(n, j.start.pressed, j.start.on_pressed, j.start.on_released); }},
+    {"ls",   [](auto& j, auto n){ return WithPressedTime(n, j.LS.pressed, j.LS.on_pressed, j.LS.on_released); }},
+    {"rs",   [](auto& j, auto n){ return WithPressedTime(n, j.RS.pressed, j.RS.on_pressed, j.RS.on_released); }},
+    {"lb",   [](auto& j, auto n){ return WithPressedTime(n, j.LB.pressed, j.LB.on_pressed, j.LB.on_released); }},
+    {"rb",   [](auto& j, auto n){ return WithPressedTime(n, j.RB.pressed, j.RB.on_pressed, j.RB.on_released); }},
+    {"a",    [](auto& j, auto n){ return WithPressedTime(n, j.A.pressed, j.A.on_pressed, j.A.on_released); }},
+    {"b",    [](auto& j, auto n){ return WithPressedTime(n, j.B.pressed, j.B.on_pressed, j.B.on_released); }},
+    {"x",    [](auto& j, auto n){ return WithPressedTime(n, j.X.pressed, j.X.on_pressed, j.X.on_released); }},
+    {"y",    [](auto& j, auto n){ return WithPressedTime(n, j.Y.pressed, j.Y.on_pressed, j.Y.on_released); }},
+    {"up",   [](auto& j, auto n){ return WithPressedTime(n, j.up.pressed, j.up.on_pressed, j.up.on_released); }},
+    {"down", [](auto& j, auto n){ return WithPressedTime(n, j.down.pressed, j.down.on_pressed, j.down.on_released); }},
+    {"left", [](auto& j, auto n){ return WithPressedTime(n, j.left.pressed, j.left.on_pressed, j.left.on_released); }},
+    {"right",[](auto& j, auto n){ return WithPressedTime(n, j.right.pressed, j.right.on_pressed, j.right.on_released); }},
+    {"f1",   [](auto& j, auto n){ return WithPressedTime(n, j.F1.pressed, j.F1.on_pressed, j.F1.on_released); }},
+    {"f2",   [](auto& j, auto n){ return WithPressedTime(n, j.F2.pressed, j.F2.on_pressed, j.F2.on_released); }},
+    {"lx",   [](auto& j, auto n){ return WithPressedTime(n, j.lx.pressed, j.lx.on_pressed, j.lx.on_released); }},
+    {"ly",   [](auto& j, auto n){ return WithPressedTime(n, j.ly.pressed, j.ly.on_pressed, j.ly.on_released); }},
+    {"rx",   [](auto& j, auto n){ return WithPressedTime(n, j.rx.pressed, j.rx.on_pressed, j.rx.on_released); }},
+    {"ry",   [](auto& j, auto n){ return WithPressedTime(n, j.ry.pressed, j.ry.on_pressed, j.ry.on_released); }},
+    {"lt",   [](auto& j, auto n){ return WithPressedTime(n, j.LT.pressed, j.LT.on_pressed, j.LT.on_released); }},
+    {"rt",   [](auto& j, auto n){ return WithPressedTime(n, j.RT.pressed, j.RT.on_pressed, j.RT.on_released); }},
   };
   auto it = kMap.find(name);
   if (it == kMap.end()) throw std::runtime_error("Unknown key name: " + std::string(name_sv));
-  return *it->second(joy);
+  return it->second(joy, name);
 }
 
 // ======================== Recursive Descent Parser ========================
@@ -311,7 +350,7 @@ inline std::function<bool(const UnitreeJoystick&)> Compile(const Node& n) {
     case Node::kAtom: {
       Atom a = n.atom;
       return [a](const UnitreeJoystick& joy) -> bool {
-        const KeyBase& kb = GetKey(joy, a.name);
+        const KeyState kb = GetKey(joy, a.name);
         switch (a.field) {
           case Field::kPressed:     return kb.pressed;
           case Field::kOnPressed:   return kb.on_pressed;
