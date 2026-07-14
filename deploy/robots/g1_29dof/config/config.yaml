@@ -1,3 +1,6 @@
+domain_id: 1
+network: lo
+
 FSM:
   _: # enabled fsms
     Passive:

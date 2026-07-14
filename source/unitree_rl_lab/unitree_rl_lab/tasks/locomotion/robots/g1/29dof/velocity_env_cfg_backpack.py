@@ -2,6 +2,7 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
@@ -19,8 +20,8 @@ BACKPACK_LOCAL_POS = (BACKPACK_BACK_SURFACE_X - 0.5 * BACKPACK_SIZE[0], 0.0, 0.1
 #BACKPACK_LOCAL_POS = (-0.115, 0.03, 0.15) # backpack left 3cm
 #BACKPACK_LOCAL_POS = (-0.115,-0.03, 0.15) # backpack right 3cm
 
-BACKPACK_MASS_RANGE = (0.6, 1.0)
-BACKPACK_PLAY_MASS = (0.8, 0.8)
+BACKPACK_MASS_RANGE = (1.8, 2.2)
+BACKPACK_PLAY_MASS = (1.8, 1.8)
 BACKPACK_COM_X_RANDOMIZATION = 0.01
 BACKPACK_COM_Y_RANDOMIZATION = 0.02
 BACKPACK_COM_Z_RANDOMIZATION = 0.01
@@ -123,7 +124,7 @@ class CommandsCfg(base_cfg.CommandsCfg):
             ang_vel_z=(0.0, 0.0),
         ),
         vel_xy_success_threshold=0.35,
-        vel_yaw_success_threshold=0.2,
+        vel_yaw_success_threshold=0.4,
     )
 
 
@@ -135,12 +136,15 @@ class RewardsCfg(base_cfg.RewardsCfg):
     """Backpack reward weights tuned toward stable forward walking."""
 
     track_lin_vel_xy = _BASE_REWARDS.track_lin_vel_xy.replace(weight=2.0)
-    track_ang_vel_z = _BASE_REWARDS.track_ang_vel_z.replace(weight=1.5)
-    base_angular_velocity = _BASE_REWARDS.base_angular_velocity.replace(weight=-0.10)
-    action_rate = _BASE_REWARDS.action_rate.replace(weight=-0.03)
-    flat_orientation_l2 = _BASE_REWARDS.flat_orientation_l2.replace(weight=-3.0)
-    gait = _BASE_REWARDS.gait.replace(weight=0.3)
-    feet_air_time = _BASE_REWARDS.feet_air_time.replace(weight=0.05)
+    track_ang_vel_z = _BASE_REWARDS.track_ang_vel_z.replace(weight=1.0)
+    alive = RewTerm(func=mdp.is_alive, weight=0.25)
+    termination_penalty = _BASE_REWARDS.termination_penalty.replace(weight=-250.0)
+    base_angular_velocity = _BASE_REWARDS.base_angular_velocity.replace(weight=-0.07)
+    action_rate = _BASE_REWARDS.action_rate.replace(weight=-0.015)
+    flat_orientation_l2 = _BASE_REWARDS.flat_orientation_l2.replace(weight=-2.0)
+    gait = _BASE_REWARDS.gait.replace(weight=0.6)
+    feet_slide = _BASE_REWARDS.feet_slide.replace(weight=-0.3)
+    feet_air_time = _BASE_REWARDS.feet_air_time.replace(weight=0.10)
 
 
 @configclass
@@ -153,7 +157,7 @@ class CurriculumCfg(base_cfg.CurriculumCfg):
 
 @configclass
 class RobotEnvCfg(base_cfg.RobotEnvCfg):
-    """Flat locomotion environment with an 800 g backpack payload model."""
+    """Flat locomotion environment with a 2 kg randomized backpack payload model."""
 
     scene: RobotSceneCfg = RobotSceneCfg(num_envs=4096, env_spacing=2.5)
     commands: CommandsCfg = CommandsCfg()

@@ -43,6 +43,9 @@ docker/.container.cfg
 docker/artifacts/
 *.tmp
 
+container_runs/
+events.out.tfevents.*
+
 # Doc Outputs
 **/docs/_build/*
 **/generated/*

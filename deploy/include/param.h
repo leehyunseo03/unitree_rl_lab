@@ -124,12 +124,22 @@ inline po::variables_map helper(int argc, char** argv)
     bin_path = get_bin_path();
     load_config_file();
 
+    int default_domain_id = 0;
+    std::string default_network = "lo";
+    if (param::config["domain_id"].IsDefined()) {
+        default_domain_id = param::config["domain_id"].as<int>();
+    }
+    if (param::config["network"].IsDefined()) {
+        default_network = param::config["network"].as<std::string>();
+    }
+
     po::options_description desc("Unitree Controller");
     desc.add_options()
         ("help,h", "produce help message")
         ("version,v", "show version")
         ("log", "record log file")
-        ("network,n", po::value<std::string>()->default_value(""), "dds network interface")
+        ("domain_id,d", po::value<int>()->default_value(default_domain_id), "dds domain id")
+        ("network,n", po::value<std::string>()->default_value(default_network), "dds network interface")
         ;
 
     po::variables_map vm;

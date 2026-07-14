@@ -25,6 +25,12 @@ def add_rsl_rl_args(parser: argparse.ArgumentParser):
     arg_group.add_argument(
         "--experiment_name", type=str, default=None, help="Name of the experiment folder where logs will be stored."
     )
+    arg_group.add_argument(
+        "--log_root_path",
+        type=str,
+        default=None,
+        help="Root directory for RSL-RL logs. Defaults to logs/rsl_rl.",
+    )
     arg_group.add_argument("--run_name", type=str, default=None, help="Run name suffix to the log directory.")
     # -- load arguments
     arg_group.add_argument("--resume", action="store_true", default=False, help="Whether to resume from a checkpoint.")
