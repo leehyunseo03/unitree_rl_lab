@@ -18,6 +18,17 @@ LIVESTREAM=2 /isaac-sim/python.sh scripts/rsl_rl/play_onnx.py \
     --livestream 2
 ```
 
+#### No camera follow
+```
+LIVESTREAM=2 /isaac-sim/python.sh scripts/rsl_rl/play_onnx.py \
+    --task Unitree-G1-29dof-Velocity-Backpack \
+    --policy /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-22_12-41-16_g1_29dof_velocity_backpack_1p5kg_dr_pm02_50k_resume/exported/policy.onnx \
+    --lin-vel-x 0.4 \
+    --real-time \
+    --livestream 2 \
+    --no-camera-follow
+```
+
 ## Train
 ```
 python scripts/rsl_rl/train.py \

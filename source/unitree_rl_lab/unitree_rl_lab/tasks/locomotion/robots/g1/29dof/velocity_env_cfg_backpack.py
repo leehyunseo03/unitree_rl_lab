@@ -13,33 +13,82 @@ from unitree_rl_lab.tasks.locomotion import mdp
 from . import velocity_env_cfg as base_cfg
 
 
-BACKPACK_SIZE = (0.06, 0.14, 0.12)
 BACKPACK_BACK_SURFACE_X = -0.085
-BACKPACK_LOCAL_POS = (BACKPACK_BACK_SURFACE_X - 0.5 * BACKPACK_SIZE[0], 0.0, 0.15) # baseline
-#BACKPACK_LOCAL_POS = (-0.135, 0.0, 0.15) # backpack far
-#BACKPACK_LOCAL_POS = (-0.115, 0.03, 0.15) # backpack left 3cm
-#BACKPACK_LOCAL_POS = (-0.115,-0.03, 0.15) # backpack right 3cm
+BACKPACK_CENTER_Y = 0.0
+BACKPACK_CENTER_Z = 0.13
 
-BACKPACK_MASS_RANGE = (1.3, 1.7)
-BACKPACK_PLAY_MASS = (1.5, 1.5)
-BACKPACK_COM_X_RANDOMIZATION = 0.01
-BACKPACK_COM_Y_RANDOMIZATION = 0.02
-BACKPACK_COM_Z_RANDOMIZATION = 0.01
+BACKPACK_PLATE_THICKNESS = 0.01
+BACKPACK_PLATE_WIDTH = 0.135
+BACKPACK_PLATE_HEIGHT = 0.24
+BACKPACK_COMPONENT_GAP = 0.01
+
+BACKPACK_PLATE_SIZE = (BACKPACK_PLATE_THICKNESS, BACKPACK_PLATE_WIDTH, BACKPACK_PLATE_HEIGHT)
+BACKPACK_CONVERTER_SIZE = (0.05, 0.11, 0.05)
+BACKPACK_JETSON_ORIN_SIZE = (0.05, 0.11, 0.11)
+BACKPACK_BATTERY_SIZE = (0.05, 0.11, 0.06)
+
+BACKPACK_PLATE_MASS = 0.150
+BACKPACK_CONVERTER_MASS = 0.100
+BACKPACK_JETSON_ORIN_MASS = 0.611
+BACKPACK_BATTERY_MASS = 0.440
+
+BACKPACK_CONVERTER_Z_OFFSET = 0.5 * BACKPACK_PLATE_HEIGHT - 0.5 * BACKPACK_CONVERTER_SIZE[2]
+BACKPACK_JETSON_ORIN_Z_OFFSET = (
+    BACKPACK_CONVERTER_Z_OFFSET
+    - 0.5 * BACKPACK_CONVERTER_SIZE[2]
+    - BACKPACK_COMPONENT_GAP
+    - 0.5 * BACKPACK_JETSON_ORIN_SIZE[2]
+)
+BACKPACK_BATTERY_Z_OFFSET = (
+    BACKPACK_JETSON_ORIN_Z_OFFSET
+    - 0.5 * BACKPACK_JETSON_ORIN_SIZE[2]
+    - BACKPACK_COMPONENT_GAP
+    - 0.5 * BACKPACK_BATTERY_SIZE[2]
+)
+
+
+def _plate_local_pos():
+    return (
+        BACKPACK_BACK_SURFACE_X - 0.5 * BACKPACK_PLATE_THICKNESS,
+        BACKPACK_CENTER_Y,
+        BACKPACK_CENTER_Z,
+    )
+
+
+def _component_local_pos(size, z_offset):
+    return (
+        BACKPACK_BACK_SURFACE_X - BACKPACK_PLATE_THICKNESS - 0.5 * size[0],
+        BACKPACK_CENTER_Y,
+        BACKPACK_CENTER_Z + z_offset,
+    )
+
+
+BACKPACK_PLATE_POS = _plate_local_pos()
+BACKPACK_CONVERTER_POS = _component_local_pos(BACKPACK_CONVERTER_SIZE, BACKPACK_CONVERTER_Z_OFFSET)
+BACKPACK_JETSON_ORIN_POS = _component_local_pos(BACKPACK_JETSON_ORIN_SIZE, BACKPACK_JETSON_ORIN_Z_OFFSET)
+BACKPACK_BATTERY_POS = _component_local_pos(BACKPACK_BATTERY_SIZE, BACKPACK_BATTERY_Z_OFFSET)
+
+BACKPACK_PARTS = (
+    (BACKPACK_PLATE_POS, BACKPACK_PLATE_MASS),
+    (BACKPACK_CONVERTER_POS, BACKPACK_CONVERTER_MASS),
+    (BACKPACK_JETSON_ORIN_POS, BACKPACK_JETSON_ORIN_MASS),
+    (BACKPACK_BATTERY_POS, BACKPACK_BATTERY_MASS),
+)
+BACKPACK_TOTAL_MASS = sum(mass for _, mass in BACKPACK_PARTS)
+BACKPACK_LOCAL_COM = tuple(
+    sum(pos[axis] * mass for pos, mass in BACKPACK_PARTS) / BACKPACK_TOTAL_MASS for axis in range(3)
+)
+BACKPACK_MASS_RANGE = (BACKPACK_TOTAL_MASS, BACKPACK_TOTAL_MASS)
+BACKPACK_PLAY_MASS = BACKPACK_MASS_RANGE
 BACKPACK_COM_RANGE = {
-    "x": (
-        BACKPACK_LOCAL_POS[0] - BACKPACK_COM_X_RANDOMIZATION,
-        BACKPACK_LOCAL_POS[0] + BACKPACK_COM_X_RANDOMIZATION,
-    ),
-    "y": (-BACKPACK_COM_Y_RANDOMIZATION, BACKPACK_COM_Y_RANDOMIZATION),
-    "z": (
-        BACKPACK_LOCAL_POS[2] - BACKPACK_COM_Z_RANDOMIZATION,
-        BACKPACK_LOCAL_POS[2] + BACKPACK_COM_Z_RANDOMIZATION,
-    ),
+    "x": (BACKPACK_LOCAL_COM[0], BACKPACK_LOCAL_COM[0]),
+    "y": (BACKPACK_LOCAL_COM[1], BACKPACK_LOCAL_COM[1]),
+    "z": (BACKPACK_LOCAL_COM[2], BACKPACK_LOCAL_COM[2]),
 }
 BACKPACK_PLAY_COM = {
-    "x": (BACKPACK_LOCAL_POS[0], BACKPACK_LOCAL_POS[0]),
-    "y": (0.0, 0.0),
-    "z": (BACKPACK_LOCAL_POS[2], BACKPACK_LOCAL_POS[2]),
+    "x": (BACKPACK_LOCAL_COM[0], BACKPACK_LOCAL_COM[0]),
+    "y": (BACKPACK_LOCAL_COM[1], BACKPACK_LOCAL_COM[1]),
+    "z": (BACKPACK_LOCAL_COM[2], BACKPACK_LOCAL_COM[2]),
 }
 
 
@@ -68,12 +117,39 @@ class RobotSceneCfg(base_cfg.RobotSceneCfg):
         debug_vis=False,
     )
 
-    backpack = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/torso_link/backpack_box",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=BACKPACK_LOCAL_POS),
+    backpack_plate = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/torso_link/backpack_plate",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=BACKPACK_PLATE_POS),
         spawn=sim_utils.CuboidCfg(
-            size=BACKPACK_SIZE,
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.05, 0.14, 0.18), roughness=0.85),
+            size=BACKPACK_PLATE_SIZE,
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.02, 0.025, 0.03), roughness=0.9),
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=False),
+        ),
+    )
+    backpack_converter = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/torso_link/backpack_converter",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=BACKPACK_CONVERTER_POS),
+        spawn=sim_utils.CuboidCfg(
+            size=BACKPACK_CONVERTER_SIZE,
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.18, 0.20, 0.22), roughness=0.75),
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=False),
+        ),
+    )
+    backpack_jetson_orin = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/torso_link/backpack_jetson_orin",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=BACKPACK_JETSON_ORIN_POS),
+        spawn=sim_utils.CuboidCfg(
+            size=BACKPACK_JETSON_ORIN_SIZE,
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.05, 0.18, 0.12), roughness=0.8),
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=False),
+        ),
+    )
+    backpack_battery = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/torso_link/backpack_battery",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=BACKPACK_BATTERY_POS),
+        spawn=sim_utils.CuboidCfg(
+            size=BACKPACK_BATTERY_SIZE,
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.05, 0.055, 0.06), roughness=0.85),
             collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=False),
         ),
     )
