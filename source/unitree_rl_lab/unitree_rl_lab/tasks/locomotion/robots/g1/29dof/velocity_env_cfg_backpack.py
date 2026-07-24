@@ -13,11 +13,11 @@ from unitree_rl_lab.tasks.locomotion import mdp
 from . import velocity_env_cfg as base_cfg
 
 
-BACKPACK_BACK_SURFACE_X = -0.085
+BACKPACK_BACK_SURFACE_X = -0.070
 BACKPACK_CENTER_Y = 0.0
 BACKPACK_CENTER_Z = 0.13
 
-BACKPACK_PLATE_THICKNESS = 0.01
+BACKPACK_PLATE_THICKNESS = 0.003
 BACKPACK_PLATE_WIDTH = 0.135
 BACKPACK_PLATE_HEIGHT = 0.24
 BACKPACK_COMPONENT_GAP = 0.01
@@ -69,27 +69,25 @@ BACKPACK_JETSON_ORIN_POS = _component_local_pos(BACKPACK_JETSON_ORIN_SIZE, BACKP
 BACKPACK_BATTERY_POS = _component_local_pos(BACKPACK_BATTERY_SIZE, BACKPACK_BATTERY_Z_OFFSET)
 
 BACKPACK_PARTS = (
-    (BACKPACK_PLATE_POS, BACKPACK_PLATE_MASS),
-    (BACKPACK_CONVERTER_POS, BACKPACK_CONVERTER_MASS),
-    (BACKPACK_JETSON_ORIN_POS, BACKPACK_JETSON_ORIN_MASS),
-    (BACKPACK_BATTERY_POS, BACKPACK_BATTERY_MASS),
+    {"name": "plate", "pos": BACKPACK_PLATE_POS, "size": BACKPACK_PLATE_SIZE, "mass": BACKPACK_PLATE_MASS},
+    {
+        "name": "converter",
+        "pos": BACKPACK_CONVERTER_POS,
+        "size": BACKPACK_CONVERTER_SIZE,
+        "mass": BACKPACK_CONVERTER_MASS,
+    },
+    {
+        "name": "jetson_orin",
+        "pos": BACKPACK_JETSON_ORIN_POS,
+        "size": BACKPACK_JETSON_ORIN_SIZE,
+        "mass": BACKPACK_JETSON_ORIN_MASS,
+    },
+    {"name": "battery", "pos": BACKPACK_BATTERY_POS, "size": BACKPACK_BATTERY_SIZE, "mass": BACKPACK_BATTERY_MASS},
 )
-BACKPACK_TOTAL_MASS = sum(mass for _, mass in BACKPACK_PARTS)
+BACKPACK_TOTAL_MASS = sum(part["mass"] for part in BACKPACK_PARTS)
 BACKPACK_LOCAL_COM = tuple(
-    sum(pos[axis] * mass for pos, mass in BACKPACK_PARTS) / BACKPACK_TOTAL_MASS for axis in range(3)
+    sum(part["pos"][axis] * part["mass"] for part in BACKPACK_PARTS) / BACKPACK_TOTAL_MASS for axis in range(3)
 )
-BACKPACK_MASS_RANGE = (BACKPACK_TOTAL_MASS, BACKPACK_TOTAL_MASS)
-BACKPACK_PLAY_MASS = BACKPACK_MASS_RANGE
-BACKPACK_COM_RANGE = {
-    "x": (BACKPACK_LOCAL_COM[0], BACKPACK_LOCAL_COM[0]),
-    "y": (BACKPACK_LOCAL_COM[1], BACKPACK_LOCAL_COM[1]),
-    "z": (BACKPACK_LOCAL_COM[2], BACKPACK_LOCAL_COM[2]),
-}
-BACKPACK_PLAY_COM = {
-    "x": (BACKPACK_LOCAL_COM[0], BACKPACK_LOCAL_COM[0]),
-    "y": (BACKPACK_LOCAL_COM[1], BACKPACK_LOCAL_COM[1]),
-    "z": (BACKPACK_LOCAL_COM[2], BACKPACK_LOCAL_COM[2]),
-}
 
 
 @configclass
@@ -123,7 +121,7 @@ class RobotSceneCfg(base_cfg.RobotSceneCfg):
         spawn=sim_utils.CuboidCfg(
             size=BACKPACK_PLATE_SIZE,
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.02, 0.025, 0.03), roughness=0.9),
-            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=False),
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
         ),
     )
     backpack_converter = AssetBaseCfg(
@@ -132,7 +130,7 @@ class RobotSceneCfg(base_cfg.RobotSceneCfg):
         spawn=sim_utils.CuboidCfg(
             size=BACKPACK_CONVERTER_SIZE,
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.18, 0.20, 0.22), roughness=0.75),
-            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=False),
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
         ),
     )
     backpack_jetson_orin = AssetBaseCfg(
@@ -141,7 +139,7 @@ class RobotSceneCfg(base_cfg.RobotSceneCfg):
         spawn=sim_utils.CuboidCfg(
             size=BACKPACK_JETSON_ORIN_SIZE,
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.05, 0.18, 0.12), roughness=0.8),
-            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=False),
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
         ),
     )
     backpack_battery = AssetBaseCfg(
@@ -150,7 +148,7 @@ class RobotSceneCfg(base_cfg.RobotSceneCfg):
         spawn=sim_utils.CuboidCfg(
             size=BACKPACK_BATTERY_SIZE,
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.05, 0.055, 0.06), roughness=0.85),
-            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=False),
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
         ),
     )
 
@@ -159,21 +157,14 @@ class RobotSceneCfg(base_cfg.RobotSceneCfg):
 class EventCfg(base_cfg.EventCfg):
     """Payload events for the backpack task."""
 
-    add_base_mass = EventTerm(
-        func=mdp.randomize_rigid_body_mass,
+    add_base_mass = None
+
+    fixed_backpack_payload = EventTerm(
+        func=mdp.apply_fixed_payload_to_rigid_body,
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="torso_link"),
-            "mass_distribution_params": BACKPACK_MASS_RANGE,
-            "operation": "add",
-        },
-    )
-    backpack_com = EventTerm(
-        func=mdp.randomize_rigid_body_com,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="torso_link"),
-            "com_range": BACKPACK_COM_RANGE,
+            "payload_parts": BACKPACK_PARTS,
         },
     )
 
@@ -249,7 +240,5 @@ class RobotPlayEnvCfg(RobotEnvCfg):
         self.scene.num_envs = 1
         self.observations.policy.enable_corruption = False
         self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
-        self.events.add_base_mass.params["mass_distribution_params"] = BACKPACK_PLAY_MASS
-        self.events.backpack_com.params["com_range"] = BACKPACK_PLAY_COM
         self.events.base_external_force_torque = None
         self.events.push_robot = None
