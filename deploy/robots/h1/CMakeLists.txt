@@ -4,6 +4,11 @@ project(h1_controller)
 find_package(Boost REQUIRED COMPONENTS program_options)
 find_package(yaml-cpp REQUIRED)
 
+set(UNITREE_SDK2_INCLUDE "$ENV{HOME}/.local/unitree_sdk2/include")
+if(EXISTS "${UNITREE_SDK2_INCLUDE}")
+  include_directories(${UNITREE_SDK2_INCLUDE})
+endif()
+
 include_directories(
   /usr/include/eigen3
   /usr/local/include/ddscxx # dds

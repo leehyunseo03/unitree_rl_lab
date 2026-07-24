@@ -29,6 +29,7 @@ public:
         for(int i(0); i < kd.size(); ++i)
         {
             auto & motor = lowcmd->msg_.motor_cmd()[i];
+            motor.mode() = 1;
             motor.kp() = 0;
             motor.kd() = kd[i];
             motor.dq() = 0;

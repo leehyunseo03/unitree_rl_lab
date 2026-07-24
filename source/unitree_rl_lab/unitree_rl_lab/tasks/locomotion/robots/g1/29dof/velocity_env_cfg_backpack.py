@@ -20,8 +20,8 @@ BACKPACK_LOCAL_POS = (BACKPACK_BACK_SURFACE_X - 0.5 * BACKPACK_SIZE[0], 0.0, 0.1
 #BACKPACK_LOCAL_POS = (-0.115, 0.03, 0.15) # backpack left 3cm
 #BACKPACK_LOCAL_POS = (-0.115,-0.03, 0.15) # backpack right 3cm
 
-BACKPACK_MASS_RANGE = (1.8, 2.2)
-BACKPACK_PLAY_MASS = (1.8, 1.8)
+BACKPACK_MASS_RANGE = (1.3, 1.7)
+BACKPACK_PLAY_MASS = (1.5, 1.5)
 BACKPACK_COM_X_RANDOMIZATION = 0.01
 BACKPACK_COM_Y_RANDOMIZATION = 0.02
 BACKPACK_COM_Z_RANDOMIZATION = 0.01
@@ -157,7 +157,7 @@ class CurriculumCfg(base_cfg.CurriculumCfg):
 
 @configclass
 class RobotEnvCfg(base_cfg.RobotEnvCfg):
-    """Flat locomotion environment with a 2 kg randomized backpack payload model."""
+    """Flat locomotion environment with a 1.5 kg randomized backpack payload model."""
 
     scene: RobotSceneCfg = RobotSceneCfg(num_envs=4096, env_spacing=2.5)
     commands: CommandsCfg = CommandsCfg()
