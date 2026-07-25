@@ -88,6 +88,22 @@ BACKPACK_TOTAL_MASS = sum(part["mass"] for part in BACKPACK_PARTS)
 BACKPACK_LOCAL_COM = tuple(
     sum(part["pos"][axis] * part["mass"] for part in BACKPACK_PARTS) / BACKPACK_TOTAL_MASS for axis in range(3)
 )
+BACKPACK_MASS_RANDOMIZATION = 0.2
+BACKPACK_TRAIN_MASS_RANGE = (
+    BACKPACK_TOTAL_MASS - BACKPACK_MASS_RANDOMIZATION,
+    BACKPACK_TOTAL_MASS + BACKPACK_MASS_RANDOMIZATION,
+)
+BACKPACK_PLAY_MASS_RANGE = (BACKPACK_TOTAL_MASS, BACKPACK_TOTAL_MASS)
+BACKPACK_TRAIN_POS_OFFSET_RANGE = {
+    "x": (0.0, 0.0),
+    "y": (-0.04, 0.04),
+    "z": (-0.05, 0.05),
+}
+BACKPACK_PLAY_POS_OFFSET_RANGE = {
+    "x": (0.0, 0.0),
+    "y": (0.0, 0.0),
+    "z": (0.0, 0.0),
+}
 
 
 @configclass
@@ -165,30 +181,32 @@ class EventCfg(base_cfg.EventCfg):
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="torso_link"),
             "payload_parts": BACKPACK_PARTS,
+            "payload_mass_range": BACKPACK_TRAIN_MASS_RANGE,
+            "payload_pos_offset_range": BACKPACK_TRAIN_POS_OFFSET_RANGE,
         },
     )
 
 
 @configclass
 class CommandsCfg(base_cfg.CommandsCfg):
-    """Forward-only velocity commands for flat backpack walking."""
+    """Omnidirectional velocity commands for flat backpack walking."""
 
     base_velocity = mdp.UniformLevelVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(10.0, 10.0),
-        rel_standing_envs=0.05,
+        rel_standing_envs=0.02,
         rel_heading_envs=0.0,
         heading_command=False,
         debug_vis=True,
         ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(0.0, 0.1),
-            lin_vel_y=(0.0, 0.0),
-            ang_vel_z=(0.0, 0.0),
+            lin_vel_x=(-0.5, 0.6),
+            lin_vel_y=(-0.3, 0.3),
+            ang_vel_z=(-0.5, 0.5),
         ),
         limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(0.0, 0.6),
-            lin_vel_y=(0.0, 0.0),
-            ang_vel_z=(0.0, 0.0),
+            lin_vel_x=(-0.5, 0.6),
+            lin_vel_y=(-0.3, 0.3),
+            ang_vel_z=(-0.5, 0.5),
         ),
         vel_xy_success_threshold=0.35,
         vel_yaw_success_threshold=0.4,
@@ -240,5 +258,7 @@ class RobotPlayEnvCfg(RobotEnvCfg):
         self.scene.num_envs = 1
         self.observations.policy.enable_corruption = False
         self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+        self.events.fixed_backpack_payload.params["payload_mass_range"] = BACKPACK_PLAY_MASS_RANGE
+        self.events.fixed_backpack_payload.params["payload_pos_offset_range"] = BACKPACK_PLAY_POS_OFFSET_RANGE
         self.events.base_external_force_torque = None
         self.events.push_robot = None

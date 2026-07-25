@@ -2,7 +2,7 @@
 ```
 /isaac-sim/python.sh scripts/rsl_rl/play.py \
   --task Unitree-G1-29dof-Velocity-Backpack \
-  --checkpoint /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-22_12-41-16_g1_29dof_velocity_backpack_1p5kg_dr_pm02_50k_resume/model_50099.pt \
+  --checkpoint /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-24_13-32-33_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_50k/model_49999.pt \
   --num_envs 1 \
   --headless \
   --export-only
@@ -12,20 +12,10 @@
 ```
 LIVESTREAM=2 /isaac-sim/python.sh scripts/rsl_rl/play_onnx.py \
     --task Unitree-G1-29dof-Velocity-Backpack \
-    --policy /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-22_12-41-16_g1_29dof_velocity_backpack_1p5kg_dr_pm02_50k_resume/exported/policy.onnx \
-    --lin-vel-x 0.4 \
+    --policy /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-24_13-32-33_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_50k/exported/policy.onnx \
+    --command -0.4 0.0 0.0\
     --real-time \
     --livestream 2
-```
-
-#### No camera follow
-```
-LIVESTREAM=2 /isaac-sim/python.sh scripts/rsl_rl/play_onnx.py \
-    --task Unitree-G1-29dof-Velocity-Backpack \
-    --policy /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-22_12-41-16_g1_29dof_velocity_backpack_1p5kg_dr_pm02_50k_resume/exported/policy.onnx \
-    --lin-vel-x 0.4 \
-    --real-time \
-    --livestream 2 \
     --no-camera-follow
 ```
 
@@ -46,9 +36,20 @@ python scripts/rsl_rl/train.py \
   --max_iterations 50000 \
   --logger wandb \
   --log_project_name unitree_rl_lab \
-  --run_name g1_29dof_velocity_backpack_1p5kg_dr_pm02_50k
+  --run_name g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_50k
 ```
 
+```
+/isaac-sim/python.sh scripts/rsl_rl/train.py \
+  --task Unitree-G1-29dof-Velocity-Backpack \
+  --headless \
+  --num_envs 4096 \
+  --max_iterations 50000 \
+  --log_root_path /workspace/unitree_rl_lab/container_runs/rsl_rl \
+  --logger wandb \
+  --log_project_name unitree_rl_lab \
+  --run_name g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_50k
+```
 ## Train Contiuously
 ```
 cd /workspace/unitree_rl_lab

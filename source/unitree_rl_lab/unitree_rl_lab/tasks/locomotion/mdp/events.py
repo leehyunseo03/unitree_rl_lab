@@ -19,6 +19,8 @@ def apply_fixed_payload_to_rigid_body(
     env_ids: torch.Tensor | None,
     asset_cfg: SceneEntityCfg,
     payload_parts: tuple[dict[str, object], ...],
+    payload_mass_range: tuple[float, float] | None = None,
+    payload_pos_offset_range: dict[str, tuple[float, float]] | None = None,
 ):
     """Merge fixed payload parts into one body's mass, CoM, and inertia."""
     asset: Articulation = env.scene[asset_cfg.name]
@@ -44,19 +46,38 @@ def apply_fixed_payload_to_rigid_body(
     base_com = coms[env_ids, body_id, :3]
     base_inertia = inertias[env_ids, body_id].reshape(-1, 3, 3)
 
-    payload_mass = 0.0
-    payload_mass_pos = torch.zeros((3,), device=asset.device, dtype=torch.float32)
+    nominal_payload_mass = 0.0
+    payload_mass_pos = torch.zeros((len(env_ids), 3), device=asset.device, dtype=torch.float32)
+    offset_ranges = payload_pos_offset_range or {}
+    offset_range_list = [offset_ranges.get(key, (0.0, 0.0)) for key in ["x", "y", "z"]]
+    offset_range_tensor = torch.tensor(offset_range_list, device=asset.device, dtype=torch.float32)
+    pos_offsets = math_utils.sample_uniform(
+        offset_range_tensor[:, 0], offset_range_tensor[:, 1], (len(env_ids), 3), device=asset.device
+    )
+
+    for part in payload_parts:
+        nominal_payload_mass += float(part["mass"])
+
+    if payload_mass_range is None:
+        sampled_payload_mass = torch.full(
+            (len(env_ids),), nominal_payload_mass, device=asset.device, dtype=torch.float32
+        )
+    else:
+        sampled_payload_mass = math_utils.sample_uniform(
+            payload_mass_range[0], payload_mass_range[1], (len(env_ids),), device=asset.device
+        )
+    mass_scale = sampled_payload_mass / nominal_payload_mass
+
     parsed_parts = []
     for part in payload_parts:
-        mass = float(part["mass"])
-        pos = torch.tensor(part["pos"], device=asset.device, dtype=torch.float32)
+        mass = mass_scale * float(part["mass"])
+        pos = torch.tensor(part["pos"], device=asset.device, dtype=torch.float32)[None, :] + pos_offsets
         size = torch.tensor(part["size"], device=asset.device, dtype=torch.float32)
-        payload_mass += mass
-        payload_mass_pos += mass * pos
+        payload_mass_pos += mass[:, None] * pos
         parsed_parts.append((mass, pos, size))
 
-    total_mass = base_mass + payload_mass
-    combined_com = (base_mass[:, None] * base_com + payload_mass_pos[None, :]) / total_mass[:, None]
+    total_mass = base_mass + sampled_payload_mass
+    combined_com = (base_mass[:, None] * base_com + payload_mass_pos) / total_mass[:, None]
 
     eye = torch.eye(3, device=asset.device, dtype=torch.float32).expand(len(env_ids), 3, 3)
     combined_inertia = base_inertia.clone()
@@ -69,17 +90,12 @@ def apply_fixed_payload_to_rigid_body(
 
     for mass, pos, size in parsed_parts:
         sx, sy, sz = size
-        part_inertia = torch.diag(
-            torch.stack(
-                (
-                    mass * (sy * sy + sz * sz) / 12.0,
-                    mass * (sx * sx + sz * sz) / 12.0,
-                    mass * (sx * sx + sy * sy) / 12.0,
-                )
-            )
-        )
-        delta = pos[None, :] - combined_com
-        combined_inertia += part_inertia[None, :, :] + mass * (
+        part_inertia = torch.zeros((len(env_ids), 3, 3), device=asset.device, dtype=torch.float32)
+        part_inertia[:, 0, 0] = mass * (sy * sy + sz * sz) / 12.0
+        part_inertia[:, 1, 1] = mass * (sx * sx + sz * sz) / 12.0
+        part_inertia[:, 2, 2] = mass * (sx * sx + sy * sy) / 12.0
+        delta = pos - combined_com
+        combined_inertia += part_inertia + mass[:, None, None] * (
             torch.sum(delta * delta, dim=1)[:, None, None] * eye - delta[:, :, None] * delta[:, None, :]
         )
 
