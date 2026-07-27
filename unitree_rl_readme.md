@@ -2,18 +2,20 @@
 ```
 /isaac-sim/python.sh scripts/rsl_rl/play.py \
   --task Unitree-G1-29dof-Velocity-Backpack \
-  --checkpoint /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-24_13-32-33_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_50k/model_49999.pt \
+  --checkpoint /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-25_18-25-54_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_floor_dr_stable_resume_to_100k/model_80000.pt \
   --num_envs 1 \
   --headless \
   --export-only
 ```
 
+/home/hslee/IsaacLab_ws/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-25_18-25-54_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_floor_dr_stable_resume_to_100k
+
 ## Policy Test
 ```
 LIVESTREAM=2 /isaac-sim/python.sh scripts/rsl_rl/play_onnx.py \
     --task Unitree-G1-29dof-Velocity-Backpack \
-    --policy /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-24_13-32-33_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_50k/exported/policy.onnx \
-    --command -0.4 0.0 0.0\
+    --policy /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-25_18-25-54_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_floor_dr_stable_resume_to_100k/exported/policy.onnx \
+    --command 0.4 -0.2 0.0 \
     --real-time \
     --livestream 2
     --no-camera-follow
@@ -67,6 +69,19 @@ cd /workspace/unitree_rl_lab
   --log_project_name unitree_rl_lab \
   --run_name g1_29dof_velocity_backpack_1p5kg_dr_pm02_50k_resume
 ```
+
+/isaac-sim/python.sh scripts/rsl_rl/train.py \
+  --task Unitree-G1-29dof-Velocity-Backpack \
+  --headless \
+  --num_envs 4096 \
+  --resume \
+  --load_run 2026-07-24_13-32-33_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_50k \
+  --checkpoint model_49999.pt \
+  --max_iterations 50000 \
+  --log_root_path /workspace/unitree_rl_lab/container_runs/rsl_rl \
+  --logger wandb \
+  --log_project_name unitree_rl_lab \
+  --run_name g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_floor_dr_stable_20k
 
 ## sim2sim (IsaacSim -> Mujoco)
 #### Mujoco

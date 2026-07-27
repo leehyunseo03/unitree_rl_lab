@@ -4,6 +4,7 @@ from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.configclass import configclass
@@ -105,10 +106,18 @@ BACKPACK_PLAY_POS_OFFSET_RANGE = {
     "z": (0.0, 0.0),
 }
 
+GROUND_STATIC_FRICTION_RANGE = (0.45, 1.35)
+GROUND_DYNAMIC_FRICTION_RANGE = (0.35, 1.10)
+GROUND_RESTITUTION_RANGE = (0.0, 0.02)
+GROUND_MATERIAL_BUCKETS = 96
+
+SOFT_GROUND_CONTACT_STIFFNESS = 2.5e5
+SOFT_GROUND_CONTACT_DAMPING = 5.0e3
+
 
 @configclass
 class RobotSceneCfg(base_cfg.RobotSceneCfg):
-    """Flat G1 scene with a simple backpack box attached to the torso link."""
+    """Flat G1 scene with a fixed backpack payload and compliant ground contact."""
 
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
@@ -121,6 +130,9 @@ class RobotSceneCfg(base_cfg.RobotSceneCfg):
             restitution_combine_mode="multiply",
             static_friction=1.0,
             dynamic_friction=1.0,
+            restitution=0.0,
+            compliant_contact_stiffness=SOFT_GROUND_CONTACT_STIFFNESS,
+            compliant_contact_damping=SOFT_GROUND_CONTACT_DAMPING,
         ),
         visual_material=sim_utils.MdlFileCfg(
             mdl_path=f"{ISAACLAB_NUCLEUS_DIR}/Materials/TilesMarbleSpiderWhiteBrickBondHoned/"
@@ -171,7 +183,20 @@ class RobotSceneCfg(base_cfg.RobotSceneCfg):
 
 @configclass
 class EventCfg(base_cfg.EventCfg):
-    """Payload events for the backpack task."""
+    """Payload and ground-contact randomization for the backpack task."""
+
+    physics_material = EventTerm(
+        func=mdp.randomize_rigid_body_material,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            "static_friction_range": GROUND_STATIC_FRICTION_RANGE,
+            "dynamic_friction_range": GROUND_DYNAMIC_FRICTION_RANGE,
+            "restitution_range": GROUND_RESTITUTION_RANGE,
+            "num_buckets": GROUND_MATERIAL_BUCKETS,
+            "make_consistent": True,
+        },
+    )
 
     add_base_mass = None
 
@@ -218,18 +243,39 @@ _BASE_REWARDS = base_cfg.RewardsCfg()
 
 @configclass
 class RewardsCfg(base_cfg.RewardsCfg):
-    """Backpack reward weights tuned toward stable forward walking."""
+    """Backpack reward weights tuned toward stable omnidirectional walking."""
 
     track_lin_vel_xy = _BASE_REWARDS.track_lin_vel_xy.replace(weight=2.0)
     track_ang_vel_z = _BASE_REWARDS.track_ang_vel_z.replace(weight=1.0)
     alive = RewTerm(func=mdp.is_alive, weight=0.25)
     termination_penalty = _BASE_REWARDS.termination_penalty.replace(weight=-250.0)
+    base_linear_velocity = _BASE_REWARDS.base_linear_velocity.replace(weight=-1.0)
     base_angular_velocity = _BASE_REWARDS.base_angular_velocity.replace(weight=-0.07)
-    action_rate = _BASE_REWARDS.action_rate.replace(weight=-0.015)
-    flat_orientation_l2 = _BASE_REWARDS.flat_orientation_l2.replace(weight=-2.0)
+    action_rate = _BASE_REWARDS.action_rate.replace(weight=-0.03)
+    dof_pos_limits = _BASE_REWARDS.dof_pos_limits.replace(weight=-3.0)
+    flat_orientation_l2 = _BASE_REWARDS.flat_orientation_l2.replace(weight=-3.0)
+    base_height = _BASE_REWARDS.base_height.replace(weight=-3.0)
     gait = _BASE_REWARDS.gait.replace(weight=0.6)
     feet_slide = _BASE_REWARDS.feet_slide.replace(weight=-0.3)
+    feet_clearance = RewTerm(
+        func=mdp.foot_clearance_reward,
+        weight=0.4,
+        params={
+            "std": 0.05,
+            "tanh_mult": 2.0,
+            "target_height": 0.08,
+            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
+        },
+    )
     feet_air_time = _BASE_REWARDS.feet_air_time.replace(weight=0.10)
+
+
+@configclass
+class TerminationsCfg(base_cfg.TerminationsCfg):
+    """Terminate severely tilted backpack rollouts early."""
+
+    bad_orientation = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.8})
 
 
 @configclass
@@ -242,12 +288,13 @@ class CurriculumCfg(base_cfg.CurriculumCfg):
 
 @configclass
 class RobotEnvCfg(base_cfg.RobotEnvCfg):
-    """Flat locomotion environment with a 1.5 kg randomized backpack payload model."""
+    """Flat locomotion environment with backpack payload and ground-contact DR."""
 
     scene: RobotSceneCfg = RobotSceneCfg(num_envs=4096, env_spacing=2.5)
     commands: CommandsCfg = CommandsCfg()
     rewards: RewardsCfg = RewardsCfg()
     events: EventCfg = EventCfg()
+    terminations: TerminationsCfg = TerminationsCfg()
     curriculum: CurriculumCfg = CurriculumCfg()
 
 

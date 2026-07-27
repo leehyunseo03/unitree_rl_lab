@@ -48,8 +48,8 @@ To match the existing playback command more closely while watching it:
 ```bash
 LIVESTREAM=2 /isaac-sim/python.sh metrics/onnx_torque_report.py \
   --task Unitree-G1-29dof-Velocity-Backpack \
-  --policy /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-13_13-26-45_g1_29dof_velocity_backpack_2kg_dr_pm02_reward_v2_yaw04/exported/policy.onnx \
-  --lin-vel-x 0.4 \
+  --policy /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-25_18-25-54_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_floor_dr_stable_resume_to_100k/exported/policy.onnx \
+  --command 0.4 0.0 0.0 \
   --duration 20 \
   --real-time \
   --livestream 2
@@ -90,12 +90,11 @@ To compare specific runs:
 
 ```bash
 python3 metrics/compare_torque_ranges.py \
-  --run-a 20260720_131153_2026-07-13_13-26-45_g1_29dof_velocity_backpack_2kg_dr_pm02_reward_v2_yaw04_vx0p40_vy0p00_wz0p00 \
-  --run-b 20260720_133715_unitree-g1-29dof-velocity_2026-07-13_13-26-45_g1_29dof_velocity_backpack_2kg_dr_pm02_reward_v2_yaw04_vx0p40_vy0p00_wz0p00 \
-  --label-a Backpack \
-  --label-b Plain-G1
+  --run-a no_backpack \
+  --run-b 20260727_041253_unitree-g1-29dof-velocity-backpack_2026-07-25_18-25-54_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_floor_dr_stable_resume_to_100k_vx0p40_vy0p00_wz0p00 \
+  --label-a Plain-G1 \
+  --label-b Backpack
 ```
-
 The comparison output includes:
 
 - `*_torque_range_compare.png`: blue and red min-to-max torque ranges on the same joint axis.
@@ -113,3 +112,37 @@ If `exported/policy.onnx` does not exist yet:
   --headless \
   --export-only
 ```
+
+
+
+
+
+
+
+cd /workspace/unitree_rl_lab
+
+RUN_ROOT=metrics/shared_runs/plain_original_vs_backpack_1p30kg_$(date +%Y%m%d_%H%M%S)
+
+# 1. Backpack policy + Backpack env
+/isaac-sim/python.sh metrics/onnx_torque_report.py \
+  --task Unitree-G1-29dof-Velocity-Backpack \
+  --policy /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-25_18-25-54_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_floor_dr_stable_resume_to_100k/exported/policy.onnx \
+  --command 0.4 0.0 0.0 \
+  --duration 20 \
+  --output-dir "$RUN_ROOT" \
+  --headless
+
+# 2. 원래 Plain policy + Plain env
+/isaac-sim/python.sh metrics/onnx_torque_report.py \
+  --task Unitree-G1-29dof-Velocity \
+  --policy /workspace/unitree_rl_lab/deploy/robots/g1_29dof/config/policy/velocity/v0/exported/policy.onnx \
+  --command 0.4 0.0 0.0 \
+  --duration 20 \
+  --output-dir "$RUN_ROOT" \
+  --headless
+
+# 3. 두 결과 비교
+python3 metrics/compare_torque_ranges.py \
+  --run-root "$RUN_ROOT" \
+  --label-a Plain-G1-original-policy \
+  --label-b Backpack-1p30kg-policy
