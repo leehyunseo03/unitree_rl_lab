@@ -18,6 +18,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_RUN_ROOT = REPO_ROOT / "metrics" / "shared_runs"
 
 from g1_effort_limits import g1_29dof_effort_limit_nm
+from torque_timeseries_plot import plot_timeseries_grid, shared_series_y_limits
 
 
 parser = argparse.ArgumentParser(description="Compare two ONNX torque metric runs.")
@@ -145,6 +146,31 @@ def _validate_joint_order(rows_a: list[dict], rows_b: list[dict]):
         raise ValueError("The two summaries do not have the same joint order.")
 
 
+def _load_timeseries(
+    summary_path: pathlib.Path,
+    filename: str,
+    expected_series_names: list[str] | None = None,
+):
+    timeseries_path = summary_path.parent / filename
+    if not timeseries_path.exists():
+        raise FileNotFoundError(f"Missing time series: {timeseries_path}")
+
+    times = []
+    values = []
+    with timeseries_path.open(newline="") as f:
+        reader = csv.DictReader(f)
+        series_names = [name for name in (reader.fieldnames or []) if name not in {"frame", "time_s"}]
+        if expected_series_names is not None and series_names != expected_series_names:
+            raise ValueError(f"Unexpected series order in: {timeseries_path}")
+        for row in reader:
+            times.append(float(row["time_s"]))
+            values.append([float(row[series_name]) for series_name in series_names])
+
+    if not times:
+        raise ValueError(f"No samples in: {timeseries_path}")
+    return timeseries_path, times, values, series_names
+
+
 def _write_delta_csv(path: pathlib.Path, rows_a: list[dict], rows_b: list[dict], label_a: str, label_b: str):
     fieldnames = [
         "joint_index",
@@ -201,6 +227,90 @@ def _save_chmod(path: pathlib.Path):
         os.chmod(path, 0o666)
     except OSError:
         pass
+
+
+def _slugify_output_label(label: str) -> str:
+    slug = "".join(char.lower() if char.isalnum() else "_" for char in label)
+    return "_".join(part for part in slug.split("_") if part) or "run"
+
+
+def _timeseries_output_paths(
+    range_output_path: pathlib.Path,
+    label_a: str,
+    label_b: str,
+    signal_name: str,
+) -> tuple[pathlib.Path, pathlib.Path]:
+    range_suffix = "_torque_range_compare"
+    if range_output_path.stem.endswith(range_suffix):
+        stem = range_output_path.stem[: -len(range_suffix)]
+    else:
+        stem = range_output_path.stem
+    output_a = range_output_path.with_name(
+        f"{stem}_{_slugify_output_label(label_a)}_{signal_name}_timeseries_grid.png"
+    )
+    output_b = range_output_path.with_name(
+        f"{stem}_{_slugify_output_label(label_b)}_{signal_name}_timeseries_grid.png"
+    )
+    return output_a, output_b
+
+
+def _plot_separate_timeseries_grids(
+    output_a: pathlib.Path,
+    output_b: pathlib.Path,
+    summary_a: pathlib.Path,
+    summary_b: pathlib.Path,
+    label_a: str,
+    label_b: str,
+    *,
+    filename: str,
+    expected_series_names: list[str] | None,
+    graph_title: str,
+    ylabel: str,
+    grid_shape: tuple[int, int],
+):
+    import numpy as np
+
+    timeseries_a, times_a, values_a, series_names_a = _load_timeseries(
+        summary_a,
+        filename,
+        expected_series_names,
+    )
+    timeseries_b, times_b, values_b, series_names_b = _load_timeseries(
+        summary_b,
+        filename,
+        expected_series_names,
+    )
+    if series_names_a != series_names_b:
+        raise ValueError(f"The two {filename} files do not have the same series order.")
+    times_a = np.asarray(times_a, dtype=float)
+    times_b = np.asarray(times_b, dtype=float)
+    values_a = np.asarray(values_a, dtype=float)
+    values_b = np.asarray(values_b, dtype=float)
+    y_limits = shared_series_y_limits(values_a, values_b)
+
+    graph_a = plot_timeseries_grid(
+        output_a,
+        series_names_a,
+        times_a,
+        values_a,
+        title=f"{graph_title} - {label_a}",
+        ylabel=ylabel,
+        color="#2563eb",
+        y_limits=y_limits,
+        grid_shape=grid_shape,
+    )
+    graph_b = plot_timeseries_grid(
+        output_b,
+        series_names_b,
+        times_b,
+        values_b,
+        title=f"{graph_title} - {label_b}",
+        ylabel=ylabel,
+        color="#dc2626",
+        y_limits=y_limits,
+        grid_shape=grid_shape,
+    )
+    return timeseries_a, timeseries_b, pathlib.Path(graph_a), pathlib.Path(graph_b)
 
 
 def _plot_png(output_path: pathlib.Path, rows_a, rows_b, label_a: str, label_b: str):
@@ -349,10 +459,91 @@ def main():
     _save_chmod(output_path)
     _save_chmod(delta_csv)
 
+    joint_names = [row["joint_name"] for row in rows_a]
+    signal_specs = [
+        {
+            "name": "torque",
+            "filename": "torque_timeseries.csv",
+            "expected_series_names": joint_names,
+            "graph_title": "Joint Torque over Time",
+            "ylabel": "Applied joint torque (N*m)",
+            "grid_shape": (3, 10),
+        },
+        {
+            "name": "joint_position",
+            "filename": "joint_position_timeseries.csv",
+            "expected_series_names": joint_names,
+            "graph_title": "Joint Position over Time",
+            "ylabel": "Joint position (rad)",
+            "grid_shape": (3, 10),
+        },
+        {
+            "name": "joint_velocity",
+            "filename": "joint_velocity_timeseries.csv",
+            "expected_series_names": joint_names,
+            "graph_title": "Joint Velocity over Time",
+            "ylabel": "Joint velocity (rad/s)",
+            "grid_shape": (3, 10),
+        },
+        {
+            "name": "base_angular_velocity",
+            "filename": "base_angular_velocity_timeseries.csv",
+            "expected_series_names": ["x_roll", "y_pitch", "z_yaw"],
+            "graph_title": "Base Angular Velocity over Time",
+            "ylabel": "Base angular velocity in body frame (rad/s)",
+            "grid_shape": (1, 3),
+        },
+        {
+            "name": "policy_action",
+            "filename": "policy_action_timeseries.csv",
+            "expected_series_names": joint_names,
+            "graph_title": "Raw Policy Action over Time",
+            "ylabel": "Raw policy action",
+            "grid_shape": (3, 10),
+        },
+    ]
+    grid_outputs = []
+    for signal_spec in signal_specs:
+        timeseries_output_a, timeseries_output_b = _timeseries_output_paths(
+            output_path,
+            label_a,
+            label_b,
+            signal_spec["name"],
+        )
+        try:
+            timeseries_a, timeseries_b, timeseries_output_a, timeseries_output_b = (
+                _plot_separate_timeseries_grids(
+                    timeseries_output_a,
+                    timeseries_output_b,
+                    summary_a,
+                    summary_b,
+                    label_a,
+                    label_b,
+                    filename=signal_spec["filename"],
+                    expected_series_names=signal_spec["expected_series_names"],
+                    graph_title=signal_spec["graph_title"],
+                    ylabel=signal_spec["ylabel"],
+                    grid_shape=signal_spec["grid_shape"],
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[WARN] Could not create {signal_spec['name']} grids ({exc}).")
+            continue
+        _save_chmod(timeseries_output_a)
+        _save_chmod(timeseries_output_b)
+        grid_outputs.append(
+            (signal_spec["name"], timeseries_a, timeseries_b, timeseries_output_a, timeseries_output_b)
+        )
+
     print(f"[INFO] Run A: {summary_a.parent}")
     print(f"[INFO] Run B: {summary_b.parent}")
     print(f"[INFO] Saved comparison graph: {output_path}")
     print(f"[INFO] Saved peak torque delta table: {delta_csv}")
+    for signal_name, timeseries_a, timeseries_b, graph_a, graph_b in grid_outputs:
+        print(f"[INFO] {signal_name} source A: {timeseries_a}")
+        print(f"[INFO] {signal_name} source B: {timeseries_b}")
+        print(f"[INFO] Saved run A {signal_name} grid: {graph_a}")
+        print(f"[INFO] Saved run B {signal_name} grid: {graph_b}")
 
 
 if __name__ == "__main__":

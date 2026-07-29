@@ -1,0 +1,39 @@
+{
+  "task": "Unitree-G1-29dof-Velocity-Backpack",
+  "policy": "/workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-25_18-25-54_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_floor_dr_stable_resume_to_100k/exported/policy.onnx",
+  "command": {
+    "lin_vel_x": 0.4,
+    "lin_vel_y": 0.0,
+    "ang_vel_z": 0.0
+  },
+  "step_dt": 0.02,
+  "warmup_steps": 50,
+  "recorded_steps": 1000,
+  "record_every": 1,
+  "reset_counts": {
+    "time_out": 1
+  },
+  "onnx_input": {
+    "name": "obs",
+    "shape": [
+      1,
+      480
+    ]
+  },
+  "onnx_output": {
+    "name": "actions",
+    "shape": [
+      1,
+      29
+    ]
+  },
+  "effort_limit_source": "Unitree official unitree_ros robots/g1_description/g1_29dof_rev_1_0.urdf",
+  "effort_limit_source_url": "https://github.com/unitreerobotics/unitree_ros/blob/master/robots/g1_description/g1_29dof_rev_1_0.urdf",
+  "outputs": {
+    "summary_csv": "/workspace/unitree_rl_lab/20260728_051302_unitree-g1-29dof-velocity-backpack_2026-07-25_18-25-54_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_floor_dr_stable_resume_to_100k_vx0p40_vy0p00_wz0p00/torque_summary.csv",
+    "summary_markdown": "/workspace/unitree_rl_lab/20260728_051302_unitree-g1-29dof-velocity-backpack_2026-07-25_18-25-54_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_floor_dr_stable_resume_to_100k_vx0p40_vy0p00_wz0p00/torque_summary.md",
+    "timeseries_csv": "/workspace/unitree_rl_lab/20260728_051302_unitree-g1-29dof-velocity-backpack_2026-07-25_18-25-54_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_floor_dr_stable_resume_to_100k_vx0p40_vy0p00_wz0p00/torque_timeseries.csv",
+    "range_graph": "/workspace/unitree_rl_lab/20260728_051302_unitree-g1-29dof-velocity-backpack_2026-07-25_18-25-54_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_floor_dr_stable_resume_to_100k_vx0p40_vy0p00_wz0p00/torque_range.png",
+    "timeseries_graph": "/workspace/unitree_rl_lab/20260728_051302_unitree-g1-29dof-velocity-backpack_2026-07-25_18-25-54_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_floor_dr_stable_resume_to_100k_vx0p40_vy0p00_wz0p00/torque_timeseries_grid.png"
+  }
+}

@@ -40,6 +40,7 @@ parser.add_argument("--max-steps", type=int, default=None, help="Override durati
 parser.add_argument("--warmup-steps", type=int, default=50, help="Steps to run before recording torque samples.")
 parser.add_argument("--record-every", type=int, default=1, help="Record one sample every N sim steps.")
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real time, if possible.")
+parser.add_argument("--seed", type=int, default=42, help="Seed used for the matched deterministic evaluation.")
 parser.add_argument(
     "--command",
     type=float,
@@ -62,6 +63,15 @@ parser.add_argument(
     action="store_true",
     default=False,
     help="Do not reset the env when the torso contacts the ground during ONNX playback.",
+)
+parser.add_argument(
+    "--preserve-task-eval-settings",
+    action="store_true",
+    default=False,
+    help=(
+        "Keep each task's original terrain, observation corruption, randomization, reset, and timeout settings. "
+        "By default both Plain and Backpack runs use the same deterministic flat-ground evaluation settings."
+    ),
 )
 parser.add_argument("--no-reset-log", action="store_true", default=False, help="Do not print reset causes.")
 parser.add_argument(
@@ -87,6 +97,7 @@ from unitree_rl_lab.utils.parser_cfg import parse_env_cfg
 
 from g1_effort_limits import G1_29DOF_EFFORT_LIMIT_SOURCE, G1_29DOF_EFFORT_LIMIT_SOURCE_URL
 from g1_effort_limits import g1_29dof_effort_limit_nm
+from torque_timeseries_plot import plot_timeseries_grid, plot_torque_timeseries_grid
 
 
 def _as_policy_obs(observations):
@@ -131,6 +142,78 @@ def _set_fixed_base_velocity(env_cfg, command):
 def _disable_base_contact_termination(env_cfg):
     if hasattr(env_cfg, "terminations") and hasattr(env_cfg.terminations, "base_contact"):
         env_cfg.terminations.base_contact = None
+
+
+def _configure_matched_evaluation(env_cfg, seed: int) -> dict:
+    """Apply deterministic settings shared by the Plain and Backpack evaluations."""
+    if hasattr(env_cfg, "seed"):
+        env_cfg.seed = seed
+
+    if hasattr(env_cfg, "observations") and hasattr(env_cfg.observations, "policy"):
+        env_cfg.observations.policy.enable_corruption = False
+
+    terrain = env_cfg.scene.terrain
+    terrain.terrain_type = "plane"
+    terrain.terrain_generator = None
+    terrain.max_init_terrain_level = None
+    material = terrain.physics_material
+    material.static_friction = 1.0
+    material.dynamic_friction = 1.0
+    material.restitution = 0.0
+    if hasattr(material, "friction_combine_mode"):
+        material.friction_combine_mode = "multiply"
+    if hasattr(material, "restitution_combine_mode"):
+        material.restitution_combine_mode = "multiply"
+    if hasattr(material, "compliant_contact_stiffness"):
+        material.compliant_contact_stiffness = 0.0
+    if hasattr(material, "compliant_contact_damping"):
+        material.compliant_contact_damping = 0.0
+    env_cfg.sim.physics_material = material
+
+    if hasattr(env_cfg, "events"):
+        for event_name in ("physics_material", "add_base_mass", "base_external_force_torque", "push_robot"):
+            if hasattr(env_cfg.events, event_name):
+                setattr(env_cfg.events, event_name, None)
+
+        if getattr(env_cfg.events, "reset_base", None) is not None:
+            reset_base_params = env_cfg.events.reset_base.params
+            reset_base_params["pose_range"] = {
+                axis: (0.0, 0.0) for axis in ("x", "y", "z", "roll", "pitch", "yaw")
+            }
+            reset_base_params["velocity_range"] = {
+                axis: (0.0, 0.0) for axis in ("x", "y", "z", "roll", "pitch", "yaw")
+            }
+        if getattr(env_cfg.events, "reset_robot_joints", None) is not None:
+            env_cfg.events.reset_robot_joints.params["position_range"] = (1.0, 1.0)
+            env_cfg.events.reset_robot_joints.params["velocity_range"] = (0.0, 0.0)
+
+    if hasattr(env_cfg, "curriculum") and hasattr(env_cfg.curriculum, "terrain_levels"):
+        env_cfg.curriculum.terrain_levels = None
+
+    # Warmup time counts toward the episode clock. A very long episode prevents
+    # the 20-second timeout from landing near 19 seconds in the recorded window.
+    env_cfg.episode_length_s = 1.0e9
+    if hasattr(env_cfg, "terminations") and hasattr(env_cfg.terminations, "bad_orientation"):
+        env_cfg.terminations.bad_orientation = None
+
+    return {
+        "matched": True,
+        "seed": seed,
+        "terrain": "plane",
+        "observation_corruption": False,
+        "ground_static_friction": 1.0,
+        "ground_dynamic_friction": 1.0,
+        "ground_restitution": 0.0,
+        "compliant_contact": False,
+        "startup_physics_randomization": False,
+        "startup_base_mass_randomization": False,
+        "external_force_randomization": False,
+        "push_randomization": False,
+        "deterministic_reset": True,
+        "episode_timeout": False,
+        "base_contact_termination": not args_cli.disable_base_contact_termination,
+        "intentional_differences": ["policy", "backpack_payload"],
+    }
 
 
 def _force_runtime_base_velocity(env, command):
@@ -217,14 +300,19 @@ def _make_run_dir(output_dir: pathlib.Path, task: str, policy_path: pathlib.Path
     return run_dir
 
 
-def _write_timeseries(path: pathlib.Path, joint_names: list[str], samples: list[dict]):
-    fieldnames = ["frame", "time_s", *joint_names]
+def _write_vector_timeseries(
+    path: pathlib.Path,
+    column_names: list[str],
+    samples: list[dict],
+    sample_key: str,
+):
+    fieldnames = ["frame", "time_s", *column_names]
     with path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for sample in samples:
             row = {"frame": sample["frame"], "time_s": f"{sample['time_s']:.6f}"}
-            row.update({name: f"{value:.6f}" for name, value in zip(joint_names, sample["torques"])})
+            row.update({name: f"{value:.6f}" for name, value in zip(column_names, sample[sample_key])})
             writer.writerow(row)
 
 
@@ -372,6 +460,10 @@ def main():
     policy_path = _resolve_path(args_cli.policy)
     if not policy_path.exists():
         raise FileNotFoundError(f"ONNX policy not found: {policy_path}")
+    if not args_cli.output_dir.strip():
+        raise ValueError(
+            "--output-dir is empty. Define RUN_ROOT in the same shell before using --output-dir \"$RUN_ROOT\"."
+        )
 
     command = _resolve_command(args_cli)
     output_dir = _resolve_path(args_cli.output_dir)
@@ -384,7 +476,17 @@ def main():
         use_fabric=not args_cli.disable_fabric,
         entry_point_key="play_env_cfg_entry_point",
     )
+    if hasattr(env_cfg, "seed"):
+        env_cfg.seed = args_cli.seed
     _set_fixed_base_velocity(env_cfg, command)
+    if args_cli.preserve_task_eval_settings:
+        evaluation_settings = {
+            "matched": False,
+            "seed": args_cli.seed,
+            "mode": "task-specific play configuration",
+        }
+    else:
+        evaluation_settings = _configure_matched_evaluation(env_cfg, args_cli.seed)
     if args_cli.disable_base_contact_termination:
         _disable_base_contact_termination(env_cfg)
 
@@ -409,6 +511,10 @@ def main():
         "[INFO] Fixed base velocity command: "
         f"x={command[0]:.3f} m/s, y={command[1]:.3f} m/s, yaw={command[2]:.3f} rad/s"
     )
+    if evaluation_settings["matched"]:
+        print("[INFO] Matched evaluation: flat ground, deterministic reset, no observation/physics randomization.")
+    else:
+        print("[WARN] Using task-specific evaluation settings; Plain and Backpack conditions may differ.")
     print(f"[INFO] Recording {max_steps} steps after {args_cli.warmup_steps} warmup steps.")
     print(f"[INFO] Saving torque report to: {run_dir}")
 
@@ -430,8 +536,22 @@ def main():
         obs = _as_policy_obs(obs)
 
         if frame > args_cli.warmup_steps and (frame - args_cli.warmup_steps - 1) % record_every == 0:
-            torque = robot.data.applied_torque[0].detach().cpu().numpy().astype(float)
-            samples.append({"frame": frame, "time_s": (frame - args_cli.warmup_steps) * dt, "torques": torque})
+            torque = _tensor_to_numpy(robot.data.applied_torque)[0].astype(float)
+            joint_position = _tensor_to_numpy(robot.data.joint_pos)[0].astype(float)
+            joint_velocity = _tensor_to_numpy(robot.data.joint_vel)[0].astype(float)
+            base_angular_velocity = _tensor_to_numpy(robot.data.root_ang_vel_b)[0].astype(float)
+            policy_action = actions_np[0].astype(float)
+            samples.append(
+                {
+                    "frame": frame,
+                    "time_s": (frame - args_cli.warmup_steps) * dt,
+                    "torques": torque,
+                    "joint_positions": joint_position,
+                    "joint_velocities": joint_velocity,
+                    "base_angular_velocity": base_angular_velocity,
+                    "policy_actions": policy_action,
+                }
+            )
 
         if args_cli.real_time:
             sleep_time = dt - (time.time() - start_time)
@@ -440,10 +560,19 @@ def main():
 
     if not samples:
         env.close()
-        raise RuntimeError("No torque samples were collected. Increase --duration or lower --warmup-steps.")
+        raise RuntimeError("No samples were collected. Increase --duration or lower --warmup-steps.")
 
     joint_names = list(robot.data.joint_names)
     torque_matrix = np.stack([sample["torques"] for sample in samples], axis=0)
+    joint_position_matrix = np.stack([sample["joint_positions"] for sample in samples], axis=0)
+    joint_velocity_matrix = np.stack([sample["joint_velocities"] for sample in samples], axis=0)
+    base_angular_velocity_matrix = np.stack([sample["base_angular_velocity"] for sample in samples], axis=0)
+    policy_action_matrix = np.stack([sample["policy_actions"] for sample in samples], axis=0)
+    if policy_action_matrix.shape[1] != len(joint_names):
+        env.close()
+        raise ValueError(
+            f"Policy output has {policy_action_matrix.shape[1]} actions for {len(joint_names)} robot joints."
+        )
     sim_effort_limits = _get_joint_effort_limits(robot, len(joint_names))
     g1_effort_limits = _get_g1_effort_limits(joint_names)
     effort_limits = np.where(np.isfinite(g1_effort_limits), g1_effort_limits, sim_effort_limits)
@@ -473,10 +602,82 @@ def main():
             }
         )
 
-    _write_timeseries(run_dir / "torque_timeseries.csv", joint_names, samples)
+    base_angular_velocity_names = ["x_roll", "y_pitch", "z_yaw"]
+    _write_vector_timeseries(run_dir / "torque_timeseries.csv", joint_names, samples, "torques")
+    _write_vector_timeseries(
+        run_dir / "joint_position_timeseries.csv",
+        joint_names,
+        samples,
+        "joint_positions",
+    )
+    _write_vector_timeseries(
+        run_dir / "joint_velocity_timeseries.csv",
+        joint_names,
+        samples,
+        "joint_velocities",
+    )
+    _write_vector_timeseries(
+        run_dir / "base_angular_velocity_timeseries.csv",
+        base_angular_velocity_names,
+        samples,
+        "base_angular_velocity",
+    )
+    _write_vector_timeseries(
+        run_dir / "policy_action_timeseries.csv",
+        joint_names,
+        samples,
+        "policy_actions",
+    )
     _write_summary(run_dir / "torque_summary.csv", summary_rows)
     _write_markdown_table(run_dir / "torque_summary.md", summary_rows)
     graph_path = _plot_torque_ranges(run_dir / "torque_range.png", joint_names, torque_min, torque_max, effort_limits)
+    times = np.asarray([sample["time_s"] for sample in samples], dtype=float)
+    run_color = "#dc2626" if "Backpack" in args_cli.task else "#2563eb"
+    timeseries_graph_path = plot_torque_timeseries_grid(
+        run_dir / "torque_timeseries_grid.png",
+        joint_names,
+        times,
+        torque_matrix,
+        title=f"Joint Torque over Time - {args_cli.task}",
+        color=run_color,
+    )
+    joint_position_graph_path = plot_timeseries_grid(
+        run_dir / "joint_position_timeseries_grid.png",
+        joint_names,
+        times,
+        joint_position_matrix,
+        title=f"Joint Position over Time - {args_cli.task}",
+        ylabel="Joint position (rad)",
+        color=run_color,
+    )
+    joint_velocity_graph_path = plot_timeseries_grid(
+        run_dir / "joint_velocity_timeseries_grid.png",
+        joint_names,
+        times,
+        joint_velocity_matrix,
+        title=f"Joint Velocity over Time - {args_cli.task}",
+        ylabel="Joint velocity (rad/s)",
+        color=run_color,
+    )
+    base_angular_velocity_graph_path = plot_timeseries_grid(
+        run_dir / "base_angular_velocity_timeseries_grid.png",
+        base_angular_velocity_names,
+        times,
+        base_angular_velocity_matrix,
+        title=f"Base Angular Velocity over Time - {args_cli.task}",
+        ylabel="Base angular velocity in body frame (rad/s)",
+        color=run_color,
+        grid_shape=(1, 3),
+    )
+    policy_action_graph_path = plot_timeseries_grid(
+        run_dir / "policy_action_timeseries_grid.png",
+        joint_names,
+        times,
+        policy_action_matrix,
+        title=f"Raw Policy Action over Time - {args_cli.task}",
+        ylabel="Raw policy action",
+        color=run_color,
+    )
 
     metadata = {
         "task": args_cli.task,
@@ -486,6 +687,7 @@ def main():
         "warmup_steps": args_cli.warmup_steps,
         "recorded_steps": len(samples),
         "record_every": record_every,
+        "evaluation_settings": evaluation_settings,
         "reset_counts": reset_counts,
         "onnx_input": {"name": input_name, "shape": session.get_inputs()[0].shape},
         "onnx_output": {"name": output_name, "shape": session.get_outputs()[0].shape},
@@ -495,7 +697,18 @@ def main():
             "summary_csv": str(run_dir / "torque_summary.csv"),
             "summary_markdown": str(run_dir / "torque_summary.md"),
             "timeseries_csv": str(run_dir / "torque_timeseries.csv"),
+            "torque_timeseries_csv": str(run_dir / "torque_timeseries.csv"),
+            "joint_position_timeseries_csv": str(run_dir / "joint_position_timeseries.csv"),
+            "joint_velocity_timeseries_csv": str(run_dir / "joint_velocity_timeseries.csv"),
+            "base_angular_velocity_timeseries_csv": str(run_dir / "base_angular_velocity_timeseries.csv"),
+            "policy_action_timeseries_csv": str(run_dir / "policy_action_timeseries.csv"),
             "range_graph": graph_path,
+            "timeseries_graph": timeseries_graph_path,
+            "torque_timeseries_graph": timeseries_graph_path,
+            "joint_position_timeseries_graph": joint_position_graph_path,
+            "joint_velocity_timeseries_graph": joint_velocity_graph_path,
+            "base_angular_velocity_timeseries_graph": base_angular_velocity_graph_path,
+            "policy_action_timeseries_graph": policy_action_graph_path,
         },
     }
     with (run_dir / "metadata.json").open("w") as f:
@@ -503,8 +716,13 @@ def main():
 
     print(f"[INFO] Saved summary table: {run_dir / 'torque_summary.csv'}")
     print(f"[INFO] Saved markdown table: {run_dir / 'torque_summary.md'}")
-    print(f"[INFO] Saved time series: {run_dir / 'torque_timeseries.csv'}")
     print(f"[INFO] Saved torque range graph: {graph_path}")
+    print(f"[INFO] Saved torque time series: {run_dir / 'torque_timeseries.csv'}")
+    print(f"[INFO] Saved torque graph: {timeseries_graph_path}")
+    print(f"[INFO] Saved joint position graph: {joint_position_graph_path}")
+    print(f"[INFO] Saved joint velocity graph: {joint_velocity_graph_path}")
+    print(f"[INFO] Saved base angular velocity graph: {base_angular_velocity_graph_path}")
+    print(f"[INFO] Saved policy action graph: {policy_action_graph_path}")
 
     env.close()
 
