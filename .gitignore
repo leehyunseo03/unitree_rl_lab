@@ -43,6 +43,9 @@ docker/.container.cfg
 docker/artifacts/
 *.tmp
 
+container_runs/
+events.out.tfevents.*
+
 # Doc Outputs
 **/docs/_build/*
 **/generated/*
@@ -70,6 +73,17 @@ datasets
 *.mtl
 *.STL
 **/env.yaml
+*.json
+*.csv
+*.png
+torque_summary.md
 
 # Mimic
 *.npz
+
+
+# Cache
+*.etli
+
+*.bin
+*.toc
