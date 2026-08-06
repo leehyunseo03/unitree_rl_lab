@@ -1,8 +1,9 @@
 """Flat G1 velocity task with only the physical backpack added.
 
-All learning settings are inherited from :mod:`velocity_env_cfg_flat`.  This
-module only adds the backpack collision geometry and folds its fixed mass,
-center of mass, and cuboid inertia into ``torso_link``.
+Rewards, observations, actions, terminations, curriculum, and terrain are
+inherited from :mod:`velocity_env_cfg_flat`.  This module adds the backpack
+collision geometry, randomized payload dynamics, floor-contact randomization,
+and omnidirectional velocity commands.
 """
 
 from __future__ import annotations
@@ -14,6 +15,8 @@ from isaaclab.assets import Articulation, AssetBaseCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
+
+from unitree_rl_lab.tasks.locomotion import mdp
 
 from . import velocity_env_cfg_flat as base_cfg
 
@@ -111,6 +114,25 @@ BACKPACK_LOCAL_COM = tuple(
     for axis in range(3)
 )
 
+# Training domain randomization.  The X position is fixed against the torso;
+# only the requested left/right (Y) and up/down (Z) offsets are sampled.
+BACKPACK_MASS_RANDOMIZATION = 0.4
+BACKPACK_TRAIN_MASS_RANGE = (
+    BACKPACK_TOTAL_MASS - BACKPACK_MASS_RANDOMIZATION,
+    BACKPACK_TOTAL_MASS + BACKPACK_MASS_RANDOMIZATION,
+)
+BACKPACK_TRAIN_POS_OFFSET_RANGE = {
+    "x": (0.0, 0.0),
+    "y": (-0.01, 0.01),
+    "z": (-0.01, 0.01),
+}
+
+# Per-environment contact-material buckets model different floor surfaces.
+GROUND_STATIC_FRICTION_RANGE = (0.45, 1.35)
+GROUND_DYNAMIC_FRICTION_RANGE = (0.35, 1.10)
+GROUND_RESTITUTION_RANGE = (0.0, 0.02)
+GROUND_MATERIAL_BUCKETS = 96
+
 
 def _selected_body_id(asset: Articulation, asset_cfg: SceneEntityCfg) -> int:
     body_ids = asset_cfg.body_ids
@@ -131,6 +153,8 @@ def _combine_backpack_dynamics(
     inertias: torch.Tensor,
     env_ids: torch.Tensor,
     body_id: int,
+    payload_masses: torch.Tensor,
+    payload_pos_offsets: torch.Tensor,
 ) -> None:
     """Combine the torso and backpack using cuboid inertia and the parallel-axis theorem."""
     base_mass = masses[env_ids, body_id]
@@ -144,14 +168,16 @@ def _combine_backpack_dynamics(
 
     payload_first_moment = torch.zeros((sample_count, 3), dtype=dtype, device=device)
     parsed_parts: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+    mass_scale = payload_masses / BACKPACK_TOTAL_MASS
     for part in BACKPACK_PARTS:
-        mass = torch.full((sample_count,), float(part["mass"]), dtype=dtype, device=device)
+        mass = mass_scale * float(part["mass"])
         pos = torch.tensor(part["pos"], dtype=dtype, device=device).expand(sample_count, 3)
+        pos = pos + payload_pos_offsets
         size = torch.tensor(part["size"], dtype=dtype, device=device)
         payload_first_moment += mass[:, None] * pos
         parsed_parts.append((mass, pos, size))
 
-    total_mass = base_mass + BACKPACK_TOTAL_MASS
+    total_mass = base_mass + payload_masses
     combined_com = (base_mass[:, None] * base_com + payload_first_moment) / total_mass[:, None]
 
     # Shift the original torso inertia from its old COM to the new combined COM.
@@ -179,14 +205,23 @@ def _combine_backpack_dynamics(
     inertias[env_ids, body_id] = combined_inertia.reshape(sample_count, 9)
 
 
-def apply_fixed_backpack_payload(
+def apply_randomized_backpack_payload(
     env,
     env_ids: torch.Tensor | None,
     asset_cfg: SceneEntityCfg,
+    payload_mass_range: tuple[float, float],
+    payload_pos_offset_range: dict[str, tuple[float, float]],
 ) -> None:
-    """Add the fixed 1.321 kg backpack to torso mass, COM, and inertia once at startup."""
+    """Sample backpack mass/position and combine its mass, COM, and inertia with the torso."""
     asset: Articulation = env.scene[asset_cfg.name]
     body_id = _selected_body_id(asset, asset_cfg)
+
+    def sample_payload(count: int, device: torch.device | str, dtype: torch.dtype):
+        payload_masses = torch.empty(count, dtype=dtype, device=device).uniform_(*payload_mass_range)
+        payload_pos_offsets = torch.empty((count, 3), dtype=dtype, device=device)
+        for axis, key in enumerate(("x", "y", "z")):
+            payload_pos_offsets[:, axis].uniform_(*payload_pos_offset_range.get(key, (0.0, 0.0)))
+        return payload_masses, payload_pos_offsets
 
     # Current Isaac Lab tensor API.
     body_mass = getattr(asset.data, "body_mass", None)
@@ -199,7 +234,16 @@ def apply_fixed_backpack_payload(
         masses = asset.data.body_mass.torch.clone()
         coms = asset.data.body_com_pose_b.torch.clone()
         inertias = asset.data.body_inertia.torch.clone()
-        _combine_backpack_dynamics(masses, coms, inertias, env_ids, body_id)
+        payload_masses, payload_pos_offsets = sample_payload(len(env_ids), masses.device, masses.dtype)
+        _combine_backpack_dynamics(
+            masses,
+            coms,
+            inertias,
+            env_ids,
+            body_id,
+            payload_masses,
+            payload_pos_offsets,
+        )
 
         body_ids = torch.tensor([body_id], dtype=torch.int32, device=asset.device)
         asset.set_masses_index(
@@ -219,7 +263,16 @@ def apply_fixed_backpack_payload(
     masses = asset.root_physx_view.get_masses().clone()
     coms = asset.root_physx_view.get_coms().clone()
     inertias = asset.root_physx_view.get_inertias().clone()
-    _combine_backpack_dynamics(masses, coms, inertias, env_ids, body_id)
+    payload_masses, payload_pos_offsets = sample_payload(len(env_ids), masses.device, masses.dtype)
+    _combine_backpack_dynamics(
+        masses,
+        coms,
+        inertias,
+        env_ids,
+        body_id,
+        payload_masses,
+        payload_pos_offsets,
+    )
     asset.root_physx_view.set_masses(masses, env_ids)
     asset.root_physx_view.set_coms(coms, env_ids)
     asset.root_physx_view.set_inertias(inertias, env_ids)
@@ -230,7 +283,7 @@ class RobotSceneCfg(base_cfg.RobotSceneCfg):
     """The original flat scene plus backpack collision geometry."""
 
     # These are collider shapes on torso_link, not separate rigid bodies.  Their
-    # physical mass is injected exactly once by apply_fixed_backpack_payload.
+    # physical mass is injected exactly once by apply_randomized_backpack_payload.
     backpack_plate = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Robot/torso_link/backpack_plate",
         init_state=AssetBaseCfg.InitialStateCfg(pos=BACKPACK_PLATE_POS),
@@ -271,26 +324,69 @@ class RobotSceneCfg(base_cfg.RobotSceneCfg):
 
 @configclass
 class EventCfg(base_cfg.EventCfg):
-    """The original flat events plus one fixed backpack payload event."""
+    """The flat events plus floor-contact and backpack domain randomization."""
 
-    fixed_backpack_payload = EventTerm(
-        func=apply_fixed_backpack_payload,
+    physics_material = EventTerm(
+        func=mdp.randomize_rigid_body_material,
         mode="startup",
-        params={"asset_cfg": SceneEntityCfg("robot", body_names="torso_link")},
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            "static_friction_range": GROUND_STATIC_FRICTION_RANGE,
+            "dynamic_friction_range": GROUND_DYNAMIC_FRICTION_RANGE,
+            "restitution_range": GROUND_RESTITUTION_RANGE,
+            "num_buckets": GROUND_MATERIAL_BUCKETS,
+            "make_consistent": True,
+        },
+    )
+
+    randomized_backpack_payload = EventTerm(
+        func=apply_randomized_backpack_payload,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="torso_link"),
+            "payload_mass_range": BACKPACK_TRAIN_MASS_RANGE,
+            "payload_pos_offset_range": BACKPACK_TRAIN_POS_OFFSET_RANGE,
+        },
+    )
+
+
+@configclass
+class CommandsCfg(base_cfg.CommandsCfg):
+    """Sample forward, backward, lateral, and turning commands from the start."""
+
+    base_velocity = mdp.UniformLevelVelocityCommandCfg(
+        asset_name="robot",
+        resampling_time_range=(10.0, 10.0),
+        rel_standing_envs=0.02,
+        rel_heading_envs=0.0,
+        heading_command=False,
+        debug_vis=True,
+        ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
+            lin_vel_x=(-0.5, 0.6),
+            lin_vel_y=(-0.3, 0.3),
+            ang_vel_z=(-0.5, 0.5),
+        ),
+        limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
+            lin_vel_x=(-0.5, 0.6),
+            lin_vel_y=(-0.3, 0.3),
+            ang_vel_z=(-0.5, 0.5),
+        ),
     )
 
 
 @configclass
 class RobotEnvCfg(base_cfg.RobotEnvCfg):
-    """Original flat training configuration with only the backpack added."""
+    """Flat training configuration with backpack and requested domain randomization."""
 
     scene: RobotSceneCfg = RobotSceneCfg(num_envs=4096, env_spacing=2.5)
     events: EventCfg = EventCfg()
+    commands: CommandsCfg = CommandsCfg()
 
 
 @configclass
 class RobotPlayEnvCfg(base_cfg.RobotPlayEnvCfg):
-    """Original flat play configuration with the same fixed backpack."""
+    """Flat play configuration with the same backpack settings."""
 
     scene: RobotSceneCfg = RobotSceneCfg(num_envs=32, env_spacing=2.5)
     events: EventCfg = EventCfg()
+    commands: CommandsCfg = CommandsCfg()
