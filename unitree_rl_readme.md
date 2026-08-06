@@ -18,5 +18,4 @@ LIVESTREAM=2 /isaac-sim/python.sh scripts/rsl_rl/play_onnx.py \
     --command 0.3 0.0 0.0 \
     --real-time \
     --livestream 2 
-```
-
+```  
