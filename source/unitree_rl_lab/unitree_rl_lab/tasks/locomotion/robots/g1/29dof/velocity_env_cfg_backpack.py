@@ -22,16 +22,26 @@ BACKPACK_PLATE_THICKNESS = 0.003
 BACKPACK_PLATE_WIDTH = 0.135
 BACKPACK_PLATE_HEIGHT = 0.24
 BACKPACK_COMPONENT_GAP = 0.01
+BACKPACK_CONVERTER_WIDTH = 0.05
+BACKPACK_CONVERTER_LEFT_INSET = 0.03
 
 BACKPACK_PLATE_SIZE = (BACKPACK_PLATE_THICKNESS, BACKPACK_PLATE_WIDTH, BACKPACK_PLATE_HEIGHT)
-BACKPACK_CONVERTER_SIZE = (0.05, 0.11, 0.05)
+BACKPACK_CONVERTER_SIZE = (0.05, BACKPACK_CONVERTER_WIDTH, 0.05)
 BACKPACK_JETSON_ORIN_SIZE = (0.05, 0.11, 0.11)
 BACKPACK_BATTERY_SIZE = (0.05, 0.11, 0.06)
 
-BACKPACK_PLATE_MASS = 0.150
+BACKPACK_PLATE_MASS = 0.170
 BACKPACK_CONVERTER_MASS = 0.100
 BACKPACK_JETSON_ORIN_MASS = 0.611
 BACKPACK_BATTERY_MASS = 0.440
+
+# G1 local +Y points left. Place the converter 3--8 cm inward from the plate's left edge.
+BACKPACK_CONVERTER_CENTER_Y = (
+    BACKPACK_CENTER_Y
+    + 0.5 * BACKPACK_PLATE_WIDTH
+    - BACKPACK_CONVERTER_LEFT_INSET
+    - 0.5 * BACKPACK_CONVERTER_WIDTH
+)
 
 BACKPACK_CONVERTER_Z_OFFSET = 0.5 * BACKPACK_PLATE_HEIGHT - 0.5 * BACKPACK_CONVERTER_SIZE[2]
 BACKPACK_JETSON_ORIN_Z_OFFSET = (
@@ -56,16 +66,18 @@ def _plate_local_pos():
     )
 
 
-def _component_local_pos(size, z_offset):
+def _component_local_pos(size, z_offset, center_y=BACKPACK_CENTER_Y):
     return (
         BACKPACK_BACK_SURFACE_X - BACKPACK_PLATE_THICKNESS - 0.5 * size[0],
-        BACKPACK_CENTER_Y,
+        center_y,
         BACKPACK_CENTER_Z + z_offset,
     )
 
 
 BACKPACK_PLATE_POS = _plate_local_pos()
-BACKPACK_CONVERTER_POS = _component_local_pos(BACKPACK_CONVERTER_SIZE, BACKPACK_CONVERTER_Z_OFFSET)
+BACKPACK_CONVERTER_POS = _component_local_pos(
+    BACKPACK_CONVERTER_SIZE, BACKPACK_CONVERTER_Z_OFFSET, BACKPACK_CONVERTER_CENTER_Y
+)
 BACKPACK_JETSON_ORIN_POS = _component_local_pos(BACKPACK_JETSON_ORIN_SIZE, BACKPACK_JETSON_ORIN_Z_OFFSET)
 BACKPACK_BATTERY_POS = _component_local_pos(BACKPACK_BATTERY_SIZE, BACKPACK_BATTERY_Z_OFFSET)
 
@@ -95,9 +107,10 @@ BACKPACK_TRAIN_MASS_RANGE = (
     BACKPACK_TOTAL_MASS + BACKPACK_MASS_RANDOMIZATION,
 )
 BACKPACK_PLAY_MASS_RANGE = (BACKPACK_TOTAL_MASS, BACKPACK_TOTAL_MASS)
+BACKPACK_LATERAL_RANDOMIZATION = 0.025
 BACKPACK_TRAIN_POS_OFFSET_RANGE = {
     "x": (0.0, 0.0),
-    "y": (-0.04, 0.04),
+    "y": (-BACKPACK_LATERAL_RANDOMIZATION, BACKPACK_LATERAL_RANDOMIZATION),
     "z": (-0.05, 0.05),
 }
 BACKPACK_PLAY_POS_OFFSET_RANGE = {
@@ -249,12 +262,12 @@ class RewardsCfg(base_cfg.RewardsCfg):
     track_ang_vel_z = _BASE_REWARDS.track_ang_vel_z.replace(weight=1.0)
     alive = RewTerm(func=mdp.is_alive, weight=0.25)
     termination_penalty = _BASE_REWARDS.termination_penalty.replace(weight=-250.0)
-    base_linear_velocity = _BASE_REWARDS.base_linear_velocity.replace(weight=-1.0)
+    base_linear_velocity = _BASE_REWARDS.base_linear_velocity.replace(weight=-0.5)
     base_angular_velocity = _BASE_REWARDS.base_angular_velocity.replace(weight=-0.07)
     action_rate = _BASE_REWARDS.action_rate.replace(weight=-0.03)
     dof_pos_limits = _BASE_REWARDS.dof_pos_limits.replace(weight=-3.0)
     flat_orientation_l2 = _BASE_REWARDS.flat_orientation_l2.replace(weight=-3.0)
-    base_height = _BASE_REWARDS.base_height.replace(weight=-3.0)
+    base_height = _BASE_REWARDS.base_height.replace(weight=-1.0)
     gait = _BASE_REWARDS.gait.replace(weight=0.6)
     feet_slide = _BASE_REWARDS.feet_slide.replace(weight=-0.3)
     feet_clearance = RewTerm(

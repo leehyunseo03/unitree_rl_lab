@@ -42,7 +42,7 @@ From the repository root in the Isaac Lab container:
 ```bash
 /isaac-sim/python.sh metrics/onnx_torque_report.py \
   --task Unitree-G1-29dof-Velocity-Backpack \
-  --policy /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-13_13-26-45_g1_29dof_velocity_backpack_2kg_dr_pm02_reward_v2_yaw04/exported/policy.onnx \
+  --policy /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-08-05_13-51-00_backpack_scratch_50k/exported/policy.onnx \
   --lin-vel-x 0.4 \
   --duration 20 \
   --headless
@@ -148,7 +148,7 @@ mkdir -p "$RUN_ROOT"
 #    This also writes torque_timeseries_grid.png in the new run directory.
 /isaac-sim/python.sh metrics/onnx_torque_report.py \
   --task Unitree-G1-29dof-Velocity-Backpack \
-  --policy /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-07-25_18-25-54_g1_29dof_velocity_backpack_1p30kg_dr_pm02_y4cm_z5cm_omni_floor_dr_stable_resume_to_100k/exported/policy.onnx \
+  --policy /workspace/unitree_rl_lab/container_runs/rsl_rl/unitree_g1_29dof_velocity_backpack/2026-08-05_13-51-00_backpack_scratch_50k/exported/policy.onnx \
   --command 0.4 0.0 0.0 \
   --seed 42 \
   --duration 20 \
