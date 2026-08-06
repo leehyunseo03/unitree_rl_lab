@@ -1,6 +1,6 @@
 # Train
 ```
-./unitree_rl_lab.sh -t \
+/isaac-sim/python.sh scripts/rsl_rl/train.py --headless \
   --task Unitree-G1-29dof-Velocity-Flat-Backpack \
   --num_envs 4096 \
   --max_iterations 50000 \
