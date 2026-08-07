@@ -11,6 +11,7 @@ import argparse
 from importlib.metadata import version
 
 from isaaclab.app import AppLauncher
+from packaging.version import parse as parse_version
 
 # local imports
 import cli_args  # isort: skip
@@ -25,6 +26,7 @@ parser.add_argument(
 )
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+parser.add_argument("--export_only", action="store_true", help="Export the checkpoint and exit without playback.")
 parser.add_argument(
     "--use_pretrained_checkpoint",
     action="store_true",
@@ -57,12 +59,48 @@ import isaaclab_tasks  # noqa: F401
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
+from isaaclab_rl.rsl_rl import (
+    RslRlOnPolicyRunnerCfg,
+    RslRlVecEnvWrapper,
+    export_policy_as_jit,
+    export_policy_as_onnx,
+    handle_deprecated_rsl_rl_cfg,
+)
 from isaaclab_tasks.utils import get_checkpoint_path
 
 import unitree_rl_lab.tasks  # noqa: F401
 from unitree_rl_lab.utils.parser_cfg import parse_env_cfg
+
+
+def load_runner_checkpoint(runner, checkpoint_path: str, installed_rsl_rl_version: str):
+    """Load both current and pre-v4 RSL-RL checkpoint formats."""
+    if parse_version(installed_rsl_rl_version) < parse_version("4.0.0"):
+        runner.load(checkpoint_path)
+        return
+
+    checkpoint = torch.load(checkpoint_path, weights_only=False, map_location="cpu")
+    legacy_state = checkpoint.get("model_state_dict")
+    if legacy_state is None:
+        runner.load(checkpoint_path)
+        return
+
+    actor_state = {}
+    for key, value in legacy_state.items():
+        if key == "std":
+            actor_state["distribution.std_param"] = value
+        elif key.startswith("actor."):
+            actor_state[f"mlp.{key.removeprefix('actor.')}"] = value
+        elif key.startswith("actor_obs_normalizer."):
+            actor_state[f"obs_normalizer.{key.removeprefix('actor_obs_normalizer.')}"] = value
+
+    if not actor_state:
+        raise RuntimeError("Legacy checkpoint does not contain an actor state dictionary.")
+
+    # Only the actor is needed for inference and export. The critic may have
+    # been trained with a different set of privileged observations.
+    runner.alg.actor.load_state_dict(actor_state, strict=True)
+    runner.current_learning_iteration = checkpoint.get("iter", 0)
+    print("[INFO]: Loaded legacy RSL-RL checkpoint into the current actor model.")
 
 
 def main():
@@ -76,12 +114,18 @@ def main():
         entry_point_key="play_env_cfg_entry_point",
     )
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
+    installed_rsl_rl_version = version("rsl-rl-lib")
+    agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, installed_rsl_rl_version)
 
     # specify directory for logging experiments
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
     log_root_path = os.path.abspath(log_root_path)
     print(f"[INFO] Loading experiment from directory: {log_root_path}")
     if args_cli.use_pretrained_checkpoint:
+        # This helper is unavailable in older Isaac Lab releases. Import it only
+        # when the corresponding option is requested so local checkpoints still work.
+        from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
+
         resume_path = get_published_pretrained_checkpoint("rsl_rl", args_cli.task)
         if not resume_path:
             print("[INFO] Unfortunately a pre-trained checkpoint is currently unavailable for this task.")
@@ -125,32 +169,38 @@ def main():
         runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     else:
         raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
-    runner.load(resume_path)
+    load_runner_checkpoint(runner, resume_path, installed_rsl_rl_version)
 
     # obtain the trained policy for inference
     policy = runner.get_inference_policy(device=env.unwrapped.device)
 
-    # extract the neural network module
-    # we do this in a try-except to maintain backwards compatibility.
-    try:
-        # version 2.3 onwards
-        policy_nn = runner.alg.policy
-    except AttributeError:
-        # version 2.2 and below
-        policy_nn = runner.alg.actor_critic
-
-    # extract the normalizer
-    if hasattr(policy_nn, "actor_obs_normalizer"):
-        normalizer = policy_nn.actor_obs_normalizer
-    elif hasattr(policy_nn, "student_obs_normalizer"):
-        normalizer = policy_nn.student_obs_normalizer
-    else:
-        normalizer = None
-
     # export policy to onnx/jit
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
-    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+    if parse_version(installed_rsl_rl_version) >= parse_version("4.0.0"):
+        runner.export_policy_to_jit(path=export_model_dir, filename="policy.pt")
+        runner.export_policy_to_onnx(path=export_model_dir, filename="policy.onnx")
+    else:
+        # extract the neural network module for legacy rsl-rl versions
+        if parse_version(installed_rsl_rl_version) >= parse_version("2.3.0"):
+            policy_nn = runner.alg.policy
+        else:
+            policy_nn = runner.alg.actor_critic
+
+        # extract the normalizer
+        if hasattr(policy_nn, "actor_obs_normalizer"):
+            normalizer = policy_nn.actor_obs_normalizer
+        elif hasattr(policy_nn, "student_obs_normalizer"):
+            normalizer = policy_nn.student_obs_normalizer
+        else:
+            normalizer = None
+
+        export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
+        export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+
+    print(f"[INFO]: Exported policy to: {os.path.join(export_model_dir, 'policy.onnx')}")
+    if args_cli.export_only:
+        env.close()
+        return
 
     dt = env.unwrapped.step_dt
     

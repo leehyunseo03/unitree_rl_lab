@@ -10,6 +10,15 @@
 ```
 - Model path : /home/hslee/IsaacLab_ws/unitree_rl_lab/logs/rsl_rl/unitree_g1_29dof_velocity_flat_backpack/2026-08-06_18-30-00_flat_backpack_v1/model_30000.pt
 
+# Convert into onnx
+```
+WANDB_MODE=disabled /isaac-sim/python.sh scripts/rsl_rl/play.py \
+  --task Unitree-G1-29dof-Velocity-Flat-Backpack \
+  --checkpoint /workspace/unitree_rl_lab/logs/rsl_rl/unitree_g1_29dof_velocity_backpack/basic_v0/model_30000.pt \
+  --num_envs 1 \
+  --headless
+```
+
 # Test
 ```
 LIVESTREAM=2 /isaac-sim/python.sh scripts/rsl_rl/play_onnx.py \
