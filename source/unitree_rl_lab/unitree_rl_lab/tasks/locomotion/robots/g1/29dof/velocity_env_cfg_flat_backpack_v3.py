@@ -27,6 +27,7 @@ except ImportError:
     # Compatibility with Isaac Lab releases that used the old function name.
     from isaaclab.utils.math import quat_apply, quat_rotate_inverse as quat_apply_inverse
 
+from . import velocity_env_cfg_flat as flat_cfg
 from . import velocity_env_cfg_flat_backpack as backpack_cfg
 
 if TYPE_CHECKING:
@@ -117,21 +118,21 @@ def torso_pelvis_yaw_error_l2(
     return torch.sum(torch.square(heading_error), dim=-1)
 
 
-_V1_REWARDS = backpack_cfg.RewardsCfg()
+_V1_REWARDS = flat_cfg.RewardsCfg()
 
 
 @configclass
-class RewardsCfg(backpack_cfg.RewardsCfg):
+class RewardsCfg(flat_cfg.RewardsCfg):
     """V1 backpack rewards plus explicit torso pitch/yaw stabilization."""
 
     # Preserve strong locomotion tracking while improving yaw-rate tracking.
-    track_ang_vel_z = _V1_REWARDS.track_ang_vel_z.replace(weight=1.25)
+    track_ang_vel_z = _V1_REWARDS.track_ang_vel_z.replace(weight=0.75)
 
     # Slightly strengthen existing pelvis/trunk smoothness terms.
     base_angular_velocity = _V1_REWARDS.base_angular_velocity.replace(weight=-0.10)
-    flat_orientation_l2 = _V1_REWARDS.flat_orientation_l2.replace(weight=-4.0)
+    flat_orientation_l2 = _V1_REWARDS.flat_orientation_l2.replace(weight=-6.0)
     joint_deviation_waists = _V1_REWARDS.joint_deviation_waists.replace(weight=-1.5)
-    action_rate = _V1_REWARDS.action_rate.replace(weight=-0.04)
+    action_rate = _V1_REWARDS.action_rate.replace(weight=-0.06)
 
     # Explicit torso terms.  These observe torso_link rather than only the root
     # pelvis, which is important because the backpack is attached to torso_link.
