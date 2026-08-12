@@ -35,47 +35,6 @@ if TYPE_CHECKING:
 EPISODE_LENGTH_S = 20.0
 
 
-def _apply_deploy_pd_gains(env_cfg) -> None:
-    """Match the training PD gains to the G1 velocity deployment config."""
-    actuators = env_cfg.scene.robot.actuators
-
-    actuators["N7520-14.3"].stiffness = {
-        ".*_hip_.*": 100.0,
-        "waist_yaw_joint": 200.0,
-    }
-    actuators["N7520-14.3"].damping = {
-        ".*_hip_.*": 2.0,
-        "waist_yaw_joint": 5.0,
-    }
-
-    actuators["N7520-22.5"].stiffness = {
-        ".*_hip_roll_.*": 100.0,
-        ".*_knee_.*": 150.0,
-    }
-    actuators["N7520-22.5"].damping = {
-        ".*_hip_roll_.*": 2.0,
-        ".*_knee_.*": 4.0,
-    }
-
-    actuators["N5020-16"].stiffness = {
-        ".*_shoulder_.*": 40.0,
-        ".*_elbow_.*": 40.0,
-        ".*_wrist_roll.*": 40.0,
-        ".*_ankle_.*": 40.0,
-        "waist_.*_joint": 200.0,
-    }
-    actuators["N5020-16"].damping = {
-        ".*_shoulder_.*": 10.0,
-        ".*_elbow_.*": 10.0,
-        ".*_wrist_roll.*": 10.0,
-        ".*_ankle_.*": 2.0,
-        "waist_.*_joint": 5.0,
-    }
-
-    actuators["W4010-25"].stiffness = 40.0
-    actuators["W4010-25"].damping = 10.0
-
-
 def _torch(tensor) -> torch.Tensor:
     """Return a torch view for both Tensor and Isaac Lab ProxyArray APIs."""
     return tensor.torch if hasattr(tensor, "torch") else tensor
@@ -163,7 +122,6 @@ class RobotEnvCfg(backpack_cfg.RobotEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
-        _apply_deploy_pd_gains(self)
         self.episode_length_s = EPISODE_LENGTH_S
 
 
@@ -177,5 +135,4 @@ class RobotPlayEnvCfg(backpack_cfg.RobotPlayEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
-        _apply_deploy_pd_gains(self)
         self.episode_length_s = EPISODE_LENGTH_S
